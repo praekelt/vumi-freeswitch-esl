@@ -55,7 +55,7 @@ class FreeSwitchESLProtocol(EventProtocol):
                 self.current_input = ''
                 return self.vumi_transport.handle_input(self, ret_value)
             else:
-                self.current_input = self.current_input + ev.DTMF_Digit
+                self.current_input += ev.DTMF_Digit
 
     def create_tts_command(self, command_template, filename, message):
         params = {"filename": filename, "text": message}
