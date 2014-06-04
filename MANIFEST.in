@@ -2,6 +2,7 @@
 include .coveragerc
 include LICENSE
 include README.rst
+include CONTRIBUTING.rst
 include requirements.pip
 include setup.py
 
