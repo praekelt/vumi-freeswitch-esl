@@ -4,7 +4,7 @@ include AUTHORS
 include CONTRIBUTING.rst
 include LICENSE
 include README.rst
-include requirements.pip
+include requirements.txt
 include setup.py
 
 # Prune stray bytecode files.
