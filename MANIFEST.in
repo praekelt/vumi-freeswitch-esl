@@ -1,8 +1,9 @@
 # Source distribution files.
 include .coveragerc
+include AUTHORS
+include CONTRIBUTING.rst
 include LICENSE
 include README.rst
-include CONTRIBUTING.rst
 include requirements.pip
 include setup.py
 
