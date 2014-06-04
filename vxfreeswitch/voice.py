@@ -102,13 +102,11 @@ class FreeSwitchESLProtocol(EventProtocol):
     def get_address(self):
         return self.uniquecallid
 
-    @inlineCallbacks
     def output_message(self, text):
-        yield self.stream_text_as_speech(text)
+        return self.stream_text_as_speech(text)
 
-    @inlineCallbacks
     def output_stream(self, url):
-        yield self.playback(url)
+        return self.playback(url)
 
     def set_input_type(self, input_type):
         self.input_type = input_type
