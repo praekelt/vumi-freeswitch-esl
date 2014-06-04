@@ -1,0 +1,9 @@
+# Source distribution files.
+include .coveragerc
+include LICENSE
+include README.rst
+include requirements.pip
+include setup.py
+
+# Prune stray bytecode files.
+global-exclude *.pyc
