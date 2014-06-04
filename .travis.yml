@@ -11,6 +11,9 @@ matrix:
     # This is a separate matrix inclusion to avoid spawning unnecessary builds.
     - python: "2.7"
       env: TWISTED_VERSION="Twisted==13.1.0"
+before_install:
+  # we need the protobuf-compiler so Vumi can install Riak client libraries
+  - sudo apt-get install -qq protobuf-compiler
 install:
   # We easy_install a binary riak_pb package because pip install needs `protoc'.
   - "pip install ${TWISTED_VERSION}"
