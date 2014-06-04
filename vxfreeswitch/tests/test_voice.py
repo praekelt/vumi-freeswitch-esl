@@ -14,9 +14,10 @@ from twisted.test.proto_helpers import StringTransport
 from vumi.message import TransportUserMessage
 from vumi.tests.helpers import VumiTestCase
 from vumi.tests.utils import LogCatcher
-from vumi.transports.voice import VoiceServerTransport
-from vumi.transports.voice.voice import FreeSwitchESLProtocol
 from vumi.transports.tests.helpers import TransportHelper
+
+from vxfreeswitch import VoiceServerTransport
+from vxfreeswitch.voice import FreeSwitchESLProtocol
 
 
 class EslCommand(object):
