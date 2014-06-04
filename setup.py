@@ -5,9 +5,7 @@ setup(
     version="0.1.0a",
     url='http://github.com/praekelt/vumi-freeswitch-esl',
     license='BSD',
-    description="Super-scalable messaging engine for the delivery of SMS, "
-                "Star Menu and chat messages to diverse audiences in "
-                "emerging markets and beyond.",
+    description="A Freeswitch eventsocket transport for Vumi.",
     long_description=open('README.rst', 'r').read(),
     author='Praekelt Foundation',
     author_email='dev@praekeltfoundation.org',
