@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="vxfreeswitch",
-    version="0.1.0a",
+    version="0.2.0a",
     url='http://github.com/praekelt/vumi-freeswitch-esl',
     license='BSD',
     description="A Freeswitch eventsocket transport for Vumi.",
