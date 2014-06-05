@@ -285,7 +285,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         with LogCatcher() as lc:
             self.proto.unboundEvent({"some": "data"}, "custom_event")
             self.assertEqual(lc.messages(), [
-                "Unbound event 'custom_event': {'some': 'data'}",
+                "Unbound event 'custom_event'",
             ])
 
 

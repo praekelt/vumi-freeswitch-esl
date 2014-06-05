@@ -128,7 +128,7 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self)
 
     def unboundEvent(self, evdata, evname):
-        log.msg("Unbound event %r: %r" % (evname, evdata))
+        log.msg("Unbound event %r" % (evname,))
 
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
