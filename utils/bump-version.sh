@@ -8,8 +8,6 @@ then
     exit 1
 fi
 
-SHORT_VER=`echo "${VER}" | sed -e "s/\.[^.]*$//"`
-
 function inplace_sed {
   # Note: we don't use sed -i -e ... because it isn't supported by FreeBSD
   # sed on OS X.
