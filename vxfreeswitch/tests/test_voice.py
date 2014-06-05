@@ -365,11 +365,16 @@ class TestVoiceServerTransport(VumiTestCase):
     @inlineCallbacks
     def test_simplemessage(self):
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
-        yield self.tx_helper.make_dispatch_reply(reg, "voice test")
+        msg = yield self.tx_helper.make_dispatch_reply(reg, "voice test")
+
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
             'type': 'sendmsg', 'name': 'speak', 'arg': 'voice test .',
         }))
+
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
     @inlineCallbacks
     def test_simpledigitcapture(self):
@@ -404,7 +409,7 @@ class TestVoiceServerTransport(VumiTestCase):
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
-        yield self.tx_helper.make_dispatch_reply(
+        msg = yield self.tx_helper.make_dispatch_reply(
             reg, 'speech url test', helper_metadata={
                 'voice': {
                     'speech_url': 'http://example.com/speech_url_test.ogg'
@@ -416,6 +421,10 @@ class TestVoiceServerTransport(VumiTestCase):
             'type': 'sendmsg', 'name': 'playback',
             'arg': 'http://example.com/speech_url_test.ogg',
         }))
+
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
     @inlineCallbacks
     def test_reply_to_client_that_has_hung_up(self):
