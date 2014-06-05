@@ -107,18 +107,28 @@ class FakeFreeswitchProtocol(LineReceiver):
         self.connected = True
         self.connect_d.callback(None)
 
+    def sendPlainEvent(self, name, params=None):
+        params = {} if params is None else params
+        params['Event-Name'] = name
+        data = "\n".join("%s: %s" % (k, v) for k, v in params.items()) + "\n"
+        self.sendLine(
+            'Content-Length: %d\nContent-Type: text/event-plain\n\n%s' %
+            (len(data), data))
+
     def sendCommandReply(self, params=""):
         self.sendLine('Content-Type: command/reply\nReply-Text: +OK\n%s\n\n' %
                       params)
 
-    def sendDisconnectEvent(self):
-        self.sendLine('Content-Type: text/disconnect-notice\n\n')
+    def sendChannelHangupEvent(self):
+        self.sendPlainEvent('Channel_Hangup')
 
     def sendDtmfEvent(self, digit):
-        data = 'Event-Name: DTMF\nDTMF-Digit: %s\n\n' % digit
-        self.sendLine(
-            'Content-Length: %d\nContent-Type: text/event-plain\n\n%s' %
-            (len(data), data))
+        self.sendPlainEvent('DTMF', {
+            'DTMF-Digit': digit,
+        })
+
+    def sendDisconnectEvent(self):
+        self.sendLine('Content-Type: text/disconnect-notice\n\n')
 
     def rawDataReceived(self, data):
         for cmd in self.esl_parser.parse(data):
@@ -285,7 +295,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         with LogCatcher() as lc:
             self.proto.unboundEvent({"some": "data"}, "custom_event")
             self.assertEqual(lc.messages(), [
-                "Unbound event 'custom_event': {'some': 'data'}",
+                "Unbound event 'custom_event'",
             ])
 
 
@@ -333,6 +343,18 @@ class TestVoiceServerTransport(VumiTestCase):
         # wait for registration message
         yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
+        self.client.sendDisconnectEvent()
+        self.client.transport.loseConnection()
+        [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(msg['content'], None)
+        self.assertEqual(msg['session_event'],
+                         TransportUserMessage.SESSION_CLOSE)
+
+    @inlineCallbacks
+    def test_client_hangup_and_disconnect(self):
+        yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+        self.client.sendChannelHangupEvent()
         self.client.sendDisconnectEvent()
         self.client.transport.loseConnection()
         [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)

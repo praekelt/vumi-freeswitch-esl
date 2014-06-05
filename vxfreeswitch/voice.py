@@ -128,7 +128,7 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self)
 
     def unboundEvent(self, evdata, evname):
-        log.msg("Unbound event %r: %r" % (evname, evdata))
+        log.msg("Unbound event %r" % (evname,))
 
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
@@ -263,10 +263,12 @@ class VoiceServerTransport(Transport):
 
     def deregister_client(self, client):
         log.msg("TRACE: Deregistering client.")
-        self.send_inbound_message(
-            client, None, TransportUserMessage.SESSION_CLOSE)
-        client.registration_d.callback(None)
-        del self._clients[client.get_address()]
+        client_addr = client.get_address()
+        if client_addr in self._clients:
+            del self._clients[client_addr]
+            self.send_inbound_message(
+                client, None, TransportUserMessage.SESSION_CLOSE)
+            client.registration_d.callback(None)
 
     def handle_input(self, client, text):
         self.send_inbound_message(client, text,
