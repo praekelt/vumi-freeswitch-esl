@@ -333,3 +333,4 @@ def log_filter_helper(evdata):
     for item in evdata:
         if item in filter_items:
             result[item] = evdata[item]
+    return result
