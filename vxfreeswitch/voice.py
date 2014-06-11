@@ -128,7 +128,9 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self)
 
     def unboundEvent(self, evdata, evname):
-        log.msg("Unbound event %r" % (evname,))
+        from json import dumps
+        log_items = log_filter_helper(evdata)
+        log.msg("Unbound event %r: %r" % (evname, dumps(log_items)))
 
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
@@ -311,3 +313,16 @@ class VoiceServerTransport(Transport):
 
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
+
+
+def log_filter_helper(evdata):
+    filter_items = [
+        "Event_Name", "Answer_State", "Caller_Unique_ID",
+        "Caller_Caller_ID_Name", "Channel_Read_Codec_Bit_Rate",
+        "Caller_Logical_Direction", "Caller_ANI", "Caller_Direction",
+        "Caller_Caller_ID_Number", "variable_rtp_local_sdp_str",
+        "Call_Direction"]
+    result = {}
+    for item in evdata:
+        if item in filter_items:
+            result[item] = evdata[item]
