@@ -295,6 +295,11 @@ class VoiceServerTransport(Transport):
 
         client_addr = message['to_addr']
         client = self._clients.get(client_addr)
+        if client is None:
+            yield self.publish_nack(
+                message["message_id"],
+                "Client %r no longer connected" % (client_addr,))
+            return
 
         text = text.encode('utf-8')
         overrideURL = None
@@ -313,6 +318,8 @@ class VoiceServerTransport(Transport):
 
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
+
+        yield self.publish_ack(message["message_id"], message["message_id"])
 
 
 def log_filter_helper(evdata):
