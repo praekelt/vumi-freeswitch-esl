@@ -8,6 +8,7 @@ through as a vumi message
 
 import md5
 import os
+import json
 
 from twisted.internet.protocol import ServerFactory
 from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
@@ -128,9 +129,9 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self)
 
     def unboundEvent(self, evdata, evname):
-        from json import dumps
         log_items = log_filter_helper(evdata)
-        log.msg("Unbound event %r: %r" % (evname, dumps(log_items)))
+        log.msg("Unbound event %r: %s" % (evname,
+                json.dumps(log_items).encode('utf-8')))
 
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
@@ -329,8 +330,5 @@ def log_filter_helper(evdata):
         "Caller_Logical_Direction", "Caller_ANI", "Caller_Direction",
         "Caller_Caller_ID_Number", "variable_rtp_local_sdp_str",
         "Call_Direction"]
-    result = {}
-    for item in evdata:
-        if item in filter_items:
-            result[item] = evdata[item]
-    return result
+    return dict([(key, value) for key, value in evdata.items()
+                 if key in filter_items])
