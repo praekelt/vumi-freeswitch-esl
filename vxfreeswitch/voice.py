@@ -11,6 +11,7 @@ import os
 
 from twisted.internet.protocol import ServerFactory
 from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
+from twisted.internet.endpoints import connectProtocol
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -18,7 +19,7 @@ from eventsocket import EventProtocol
 
 from vumi.transports import Transport
 from vumi.message import TransportUserMessage
-from vumi.config import ConfigServerEndpoint, ConfigText
+from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint, ConfigText
 from vumi.errors import VumiError
 
 
@@ -174,6 +175,11 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
         " will connect to).",
         required=True, default="tcp:port=8084", static=True)
 
+    twisted_client_endpoint = ConfigClientEndpoint(
+        "The endpoint the voice transport will send commands to (and that "
+        "Freeswitch will listen to).",
+        required=False, default=None, static=True)
+
 
 class VoiceServerTransport(Transport):
     """
@@ -234,8 +240,11 @@ class VoiceServerTransport(Transport):
 
         factory = ServerFactory()
         factory.protocol = protocol
-
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
+
+        if self.config.twisted_client_endpoint:
+            self.voice_client = yield connectProtocol(
+                    self.config.twisted_client_endpoint, protocol)
 
     @inlineCallbacks
     def teardown_transport(self):
