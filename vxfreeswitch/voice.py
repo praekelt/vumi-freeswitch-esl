@@ -9,7 +9,7 @@ through as a vumi message
 import md5
 import os
 
-from twisted.internet.protocol import ServerFactory
+from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
 from twisted.internet.endpoints import connectProtocol
 from twisted.internet.utils import getProcessOutput
@@ -243,8 +243,10 @@ class VoiceServerTransport(Transport):
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
 
         if self.config.twisted_client_endpoint:
-            self.voice_client = yield connectProtocol(
-                    self.config.twisted_client_endpoint, protocol)
+            factory = ClientFactory()
+            factory.protocol = protocol
+            self.voice_client = yield (
+                    self.config.twisted_client_endpoint.connect(factory))
 
     @inlineCallbacks
     def teardown_transport(self):
