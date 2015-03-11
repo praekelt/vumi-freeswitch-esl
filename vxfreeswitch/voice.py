@@ -11,7 +11,6 @@ import os
 
 from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
-from twisted.internet.endpoints import connectProtocol
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -131,6 +130,11 @@ class FreeSwitchESLProtocol(EventProtocol):
     def unboundEvent(self, evdata, evname):
         log.msg("Unbound event %r" % (evname,))
 
+    def make_call(self, number):
+        profile = self.vumi_transport.config.sofia_profile
+        call_url = "sofia/%(profile)s/%(number)s%" % (profile, number)
+        return self.bgapi("originate %s" % (call_url))
+
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
@@ -178,7 +182,12 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     twisted_client_endpoint = ConfigClientEndpoint(
         "The endpoint the voice transport will send commands to (and that "
         "Freeswitch will listen to).",
-        required=False, default=None, static=True)
+        required=True, default=None, static=True)
+
+    sofia_profile = ConfigText(
+        "The name of the sofia profile defined in sofia.conf.xml in "
+        "FreeSwitch.",
+        default="$${profile}", static=True)
 
 
 class VoiceServerTransport(Transport):
@@ -242,11 +251,10 @@ class VoiceServerTransport(Transport):
         factory.protocol = protocol
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
 
-        if self.config.twisted_client_endpoint:
-            factory = ClientFactory()
-            factory.protocol = protocol
-            self.voice_client = yield (
-                    self.config.twisted_client_endpoint.connect(factory))
+        factory = ClientFactory()
+        factory.protocol = protocol
+        self.voice_client = yield (
+                self.config.twisted_client_endpoint.connect(factory))
 
     @inlineCallbacks
     def teardown_transport(self):
@@ -304,6 +312,12 @@ class VoiceServerTransport(Transport):
 
         client_addr = message['to_addr']
         client = self._clients.get(client_addr)
+
+        if (client is None and message.get('session_event') ==
+                TransportUserMessage.SESSION_NEW):
+            client = self.voice_client()
+            yield client.make_call(message['to_addr'])
+
         if client is None:
             yield self.publish_nack(
                 message["message_id"],
