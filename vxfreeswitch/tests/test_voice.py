@@ -8,7 +8,7 @@ import os
 from twisted.internet.defer import (
     inlineCallbacks, DeferredQueue, returnValue, Deferred)
 from twisted.protocols.basic import LineReceiver
-from twisted.internet import reactor, protocol
+from twisted.internet import reactor, protocol, endpoints
 from twisted.test.proto_helpers import StringTransport
 
 from vumi.message import TransportUserMessage
@@ -444,3 +444,45 @@ class TestVoiceServerTransport(VumiTestCase):
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Client u'TESTTEST' no longer connected")
+
+class RecordingServer(protocol.Protocol):
+    def __init__(self, factory):
+        self.factory = factory
+
+    def dataReceived(self, data):
+        self.factory.data.append(data)
+
+
+class RecordingServerFactory(protocol.Factory):
+    def __init__(self):
+        self.data = []
+
+    def buildProtocol(self, addr):
+        return RecordingServer(self)
+
+
+class TestVoiceClientTransport(VumiTestCase):
+
+    transport_class = VoiceServerTransport
+    transport_type = 'voice'
+
+    @inlineCallbacks
+    def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(self.recording_factory)
+        self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:port=1337',
+        })
+        self.add_cleanup(self.disconnect_server)
+
+    @inlineCallbacks
+    def disconnect_server(self):
+        yield self.server.loseConnection()
+        yield self.worker.voice_client.transport.loseConnection()
+
+    def test_create_call(self):
+        pass
+
