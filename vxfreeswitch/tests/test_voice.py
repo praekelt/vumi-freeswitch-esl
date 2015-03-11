@@ -173,10 +173,15 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(
+                self.recording_factory)
         self.tx_helper = self.add_helper(
             TransportHelper(self.transport_class))
-        self.worker = yield self.tx_helper.get_transport(
-            {'twisted_endpoint': 'tcp:port=0'})
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
 
         self.tr = EslTransport()
 
@@ -185,6 +190,12 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
         self.voice_cache_folder = self.mktemp()
         os.mkdir(self.voice_cache_folder)
+        self.add_cleanup(self.disconnect_server)
+
+    @inlineCallbacks
+    def disconnect_server(self):
+        yield self.server.loseConnection()
+        yield self.worker.voice_client.transport.loseConnection()
 
     def send_event(self, params):
         for key, value in params:
@@ -306,9 +317,14 @@ class TestVoiceServerTransport(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(
+                self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
-        self.worker = yield self.tx_helper.get_transport(
-            {'twisted_endpoint': 'tcp:port=0'})
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
         self.client = yield self.make_client()
         self.add_cleanup(self.wait_for_client_deregistration)
         yield self.wait_for_client_start()
@@ -320,6 +336,8 @@ class TestVoiceServerTransport(VumiTestCase):
             self.client.transport.loseConnection()
             yield self.client.disconnect_d
             yield self.tx_helper.kick_delivery()
+        yield self.server.loseConnection()
+        yield self.worker.voice_client.transport.loseConnection()
 
     def wait_for_client_start(self):
         return self.client.connect_d
@@ -445,6 +463,7 @@ class TestVoiceServerTransport(VumiTestCase):
         self.assertEqual(nack['nack_reason'],
                          "Client u'TESTTEST' no longer connected")
 
+
 class RecordingServer(protocol.Protocol):
     def __init__(self, factory):
         self.factory = factory
@@ -470,7 +489,8 @@ class TestVoiceClientTransport(VumiTestCase):
     def setUp(self):
         self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
         self.recording_factory = RecordingServerFactory()
-        self.server = yield self.recording_server.listen(self.recording_factory)
+        self.server = yield self.recording_server.listen(
+            self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
@@ -485,4 +505,3 @@ class TestVoiceClientTransport(VumiTestCase):
 
     def test_create_call(self):
         pass
-
