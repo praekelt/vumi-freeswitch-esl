@@ -465,6 +465,9 @@ class TestVoiceServerTransport(VumiTestCase):
 
 
 class RecordingServer(Protocol):
+    def connectionMade(self):
+        self.factory.clients.append(self)
+
     def dataReceived(self, line):
         self.factory.data.append(line)
         uuid = '%s' % uuid4()
@@ -486,10 +489,21 @@ class RecordingServer(Protocol):
             'Content-Type: text/event-plain\n\n' +
             content)
 
+    def hangup(self):
+        content = (
+            'Event-Name: CHANNEL_HANGUP\n')
+        self.transport.write(
+            'Content-Length: %s\n' % len(content) +
+            'Content-Type: text/event-plain\n\n' +
+            content
+        )
+
+
 
 class RecordingServerFactory(protocol.Factory):
     protocol = RecordingServer
     data = []
+    clients = []
 
 
 class TestVoiceClientTransport(VumiTestCase):
@@ -524,3 +538,16 @@ class TestVoiceClientTransport(VumiTestCase):
         client.transport.loseConnection()
         self.assertTrue('54321' in self.recording_factory.data[1])
         self.assertTrue('foobar' in self.recording_factory.data[-1])
+
+    @inlineCallbacks
+    def test_channel_hangup(self):
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        [client_addr] = self.worker._clients.keys()
+        client = self.worker._clients[client_addr]
+        self.assertTrue(client_addr in self.worker._clients)
+        [rec_server] = self.recording_factory.clients
+        rec_server.hangup()
+        yield client.registration_d
+        self.assertFalse(client_addr in self.worker._clients)
