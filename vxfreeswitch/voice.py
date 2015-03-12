@@ -161,6 +161,13 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
                 self.uniquecallid = ev.Job_UUID
                 d.callback(True)
 
+    @inlineCallbacks
+    def onChannelHangup(self, ev):
+        client = self.vumi_transport._clients[self.uniquecallid]
+        if client:
+            self.vumi_transport.deregister_client(client)
+        yield self.transport.loseConnection()
+
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
