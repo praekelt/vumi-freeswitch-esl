@@ -3,10 +3,12 @@
 """Tests for vxfreeswitch.voice."""
 
 import md5
+from uuid import uuid4
 import os
 
 from twisted.internet.defer import (
     inlineCallbacks, DeferredQueue, returnValue, Deferred)
+from twisted.internet.protocol import Protocol
 from twisted.protocols.basic import LineReceiver
 from twisted.internet import reactor, protocol, endpoints
 from twisted.test.proto_helpers import StringTransport
@@ -195,7 +197,6 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
     @inlineCallbacks
     def disconnect_server(self):
         yield self.server.loseConnection()
-        yield self.worker.voice_client.transport.loseConnection()
 
     def send_event(self, params):
         for key, value in params:
@@ -337,7 +338,6 @@ class TestVoiceServerTransport(VumiTestCase):
             yield self.client.disconnect_d
             yield self.tx_helper.kick_delivery()
         yield self.server.loseConnection()
-        yield self.worker.voice_client.transport.loseConnection()
 
     def wait_for_client_start(self):
         return self.client.connect_d
@@ -464,20 +464,32 @@ class TestVoiceServerTransport(VumiTestCase):
                          "Client u'TESTTEST' no longer connected")
 
 
-class RecordingServer(protocol.Protocol):
-    def __init__(self, factory):
-        self.factory = factory
-
-    def dataReceived(self, data):
-        self.factory.data.append(data)
+class RecordingServer(Protocol):
+    def dataReceived(self, line):
+        self.factory.data.append(line)
+        uuid = '%s' % uuid4()
+        # Send server immediate response
+        self.transport.write(
+            'Content-Type: command/reply\n'
+            'Reply-Text: +OK\n'
+            'Job-UUID: %s\n\n' % uuid)
+        # Send job complete success response
+        if not line.startswith('bgapi originate'):
+            return
+        content = (
+            'Content-Length: %s\n' % (len(uuid) + 4) +
+            'Event-Name: BACKGROUND_JOB\n' +
+            'Job-UUID: %s\n\n' % uuid +
+            '+OK %s\n' % uuid)
+        self.transport.write(
+            'Content-Length: %s\n' % len(content) +
+            'Content-Type: text/event-plain\n\n' +
+            content)
 
 
 class RecordingServerFactory(protocol.Factory):
-    def __init__(self):
-        self.data = []
-
-    def buildProtocol(self, addr):
-        return RecordingServer(self)
+    protocol = RecordingServer
+    data = []
 
 
 class TestVoiceClientTransport(VumiTestCase):
@@ -501,7 +513,14 @@ class TestVoiceClientTransport(VumiTestCase):
     @inlineCallbacks
     def disconnect_server(self):
         yield self.server.loseConnection()
-        yield self.worker.voice_client.transport.loseConnection()
 
+    @inlineCallbacks
     def test_create_call(self):
-        pass
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        [client] = self.worker._clients.values()
+        self.worker.deregister_client(client)
+        client.transport.loseConnection()
+        self.assertTrue('54321' in self.recording_factory.data[1])
+        self.assertTrue('foobar' in self.recording_factory.data[-1])
