@@ -10,7 +10,7 @@ import md5
 import os
 
 from twisted.internet.protocol import ServerFactory, ClientFactory
-from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
+from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults, returnValue
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -130,10 +130,36 @@ class FreeSwitchESLProtocol(EventProtocol):
     def unboundEvent(self, evdata, evname):
         log.msg("Unbound event %r" % (evname,))
 
+
+class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
+    def __init__(self, vumi_transport):
+        EventProtocol.__init__(self)
+        self.vumi_transport = vumi_transport
+        self.job_queue = {}
+
+    @inlineCallbacks
+    def connectionMade(self):
+        yield self.eventplain("BACKGROUND_JOB CHANNEL_HANGUP")
+        self.factory.ready.callback(self)
+
     def make_call(self, number):
+        def _success(ev):
+            response = Deferred()
+            self.job_queue[ev.Job_UUID] = response
+            return response
         profile = self.vumi_transport.config.sofia_profile
-        call_url = "sofia/%(profile)s/%(number)s%" % (profile, number)
-        return self.bgapi("originate %s" % (call_url))
+        call_url = "sofia/%s/%s" % (profile, number)
+        d = self.bgapi("originate %s" % (call_url))
+        d.addCallback(_success)
+        return d
+
+    def onBackgroundJob(self, ev):
+        d = self.job_queue.pop(ev.Job_UUID, None)
+        if d:
+            response, content = ev.rawresponse.split()
+            if response == "+OK":
+                self.uniquecallid = ev.Job_UUID
+                d.callback(True)
 
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
@@ -247,14 +273,23 @@ class VoiceServerTransport(Transport):
         def protocol():
             return FreeSwitchESLProtocol(self)
 
+        def client_protocol():
+            return FreeSwitchESLClientProtocol(self)
+
         factory = ServerFactory()
         factory.protocol = protocol
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
 
-        factory = ClientFactory()
-        factory.protocol = protocol
-        self.voice_client = yield (
-                self.config.twisted_client_endpoint.connect(factory))
+        self.client_factory = ClientFactory()
+        self.client_factory.protocol = client_protocol
+
+    @inlineCallbacks
+    def create_voice_client(self):
+        self.client_factory.ready = Deferred()
+        voice_client = yield (
+            self.config.twisted_client_endpoint.connect(self.client_factory))
+        yield self.client_factory.ready
+        returnValue(voice_client)
 
     @inlineCallbacks
     def teardown_transport(self):
@@ -315,8 +350,9 @@ class VoiceServerTransport(Transport):
 
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
-            client = self.voice_client()
+            client = yield self.create_voice_client()
             yield client.make_call(message['to_addr'])
+            self.register_client(client)
 
         if client is None:
             yield self.publish_nack(
