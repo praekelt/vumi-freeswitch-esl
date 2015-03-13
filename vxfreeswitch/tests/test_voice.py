@@ -526,14 +526,17 @@ class TestVoiceClientTransport(VumiTestCase):
     def disconnect_server(self):
         yield self.server.loseConnection()
 
+    def disconnect_client(self, client):
+        self.worker.deregister_client(client)
+        client.transport.loseConnection()
+
     @inlineCallbacks
     def test_create_call(self):
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
         yield self.tx_helper.dispatch_outbound(msg)
         [client] = self.worker._clients.values()
-        self.worker.deregister_client(client)
-        client.transport.loseConnection()
+        self.disconnect_client(client)
         self.assertTrue('54321' in self.recording_factory.data[1])
         self.assertTrue('foobar' in self.recording_factory.data[-1])
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -556,3 +559,5 @@ class TestVoiceClientTransport(VumiTestCase):
             self.tx_helper.wait_for_dispatched_inbound(1))
         self.assertEqual(
             hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
+        self.assertEqual(
+            hangup_msg['from_addr'], msg['to_addr'])
