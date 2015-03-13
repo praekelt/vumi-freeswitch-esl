@@ -160,7 +160,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
         if d:
             response, content = ev.rawresponse.split()
             if response == "+OK":
-                d.callback(True)
+                d.callback(content)
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
