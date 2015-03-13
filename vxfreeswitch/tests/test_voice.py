@@ -538,6 +538,9 @@ class TestVoiceClientTransport(VumiTestCase):
         client.transport.loseConnection()
         self.assertTrue('54321' in self.recording_factory.data[1])
         self.assertTrue('foobar' in self.recording_factory.data[-1])
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
     @inlineCallbacks
     def test_channel_hangup(self):
@@ -551,3 +554,7 @@ class TestVoiceClientTransport(VumiTestCase):
         rec_server.hangup()
         yield client.registration_d
         self.assertFalse(client_addr in self.worker._clients)
+        [sent_msg, hangup_msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
+
+
