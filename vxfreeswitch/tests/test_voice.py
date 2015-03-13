@@ -468,6 +468,12 @@ class RecordingServer(Protocol):
     def connectionMade(self):
         self.factory.clients.append(self)
 
+    def _send_event(self, content):
+        self.transport.write(
+            'Content-Length: %s\n' % len(content) +
+            'Content-Type: text/event-plain\n\n' +
+            content)
+
     def dataReceived(self, line):
         self.factory.data.append(line)
         uuid = '%s' % uuid4()
@@ -484,19 +490,12 @@ class RecordingServer(Protocol):
             'Event-Name: BACKGROUND_JOB\n' +
             'Job-UUID: %s\n\n' % uuid +
             '+OK %s\n' % uuid)
-        self.transport.write(
-            'Content-Length: %s\n' % len(content) +
-            'Content-Type: text/event-plain\n\n' +
-            content)
+        self._send_event(content)
 
     def hangup(self):
         content = (
             'Event-Name: CHANNEL_HANGUP\n')
-        self.transport.write(
-            'Content-Length: %s\n' % len(content) +
-            'Content-Type: text/event-plain\n\n' +
-            content
-        )
+        self._send_event(content)
 
 
 class RecordingServerFactory(protocol.Factory):
