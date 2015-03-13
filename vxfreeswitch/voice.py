@@ -147,6 +147,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             response = Deferred()
             self.job_queue[ev.Job_UUID] = response
             return response
+        self.uniquecallid = number
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, number)
         d = self.bgapi("originate %s" % (call_url))
@@ -158,7 +159,6 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
         if d:
             response, content = ev.rawresponse.split()
             if response == "+OK":
-                self.uniquecallid = ev.Job_UUID
                 d.callback(True)
 
     @inlineCallbacks
