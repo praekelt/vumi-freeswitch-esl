@@ -499,7 +499,6 @@ class RecordingServer(Protocol):
         )
 
 
-
 class RecordingServerFactory(protocol.Factory):
     protocol = RecordingServer
     data = []
@@ -554,7 +553,7 @@ class TestVoiceClientTransport(VumiTestCase):
         rec_server.hangup()
         yield client.registration_d
         self.assertFalse(client_addr in self.worker._clients)
-        [sent_msg, hangup_msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
-        self.assertEqual(hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
-
-
+        [sent_msg, hangup_msg] = yield (
+            self.tx_helper.wait_for_dispatched_inbound(1))
+        self.assertEqual(
+            hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)

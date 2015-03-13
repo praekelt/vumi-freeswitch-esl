@@ -10,7 +10,8 @@ import md5
 import os
 
 from twisted.internet.protocol import ServerFactory, ClientFactory
-from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults, returnValue
+from twisted.internet.defer import (
+        inlineCallbacks, Deferred, gatherResults, returnValue)
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
