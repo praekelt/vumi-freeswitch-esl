@@ -164,7 +164,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
-        client = self.vumi_transport._clients[self.uniquecallid]
+        client = self.vumi_transport._clients.get(self.uniquecallid)
         if client:
             self.vumi_transport.deregister_client(client)
         yield self.transport.loseConnection()
