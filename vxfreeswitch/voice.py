@@ -137,11 +137,12 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
         EventProtocol.__init__(self)
         self.vumi_transport = vumi_transport
         self.job_queue = {}
+        self.ready = Deferred()
 
     @inlineCallbacks
     def connectionMade(self):
         yield self.eventplain("BACKGROUND_JOB CHANNEL_HANGUP")
-        self.factory.ready.callback(self)
+        self.ready.callback(self)
 
     def make_call(self, number):
         def _success(ev):
@@ -293,10 +294,9 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def create_voice_client(self):
-        self.client_factory.ready = Deferred()
         voice_client = yield (
             self.config.twisted_client_endpoint.connect(self.client_factory))
-        yield self.client_factory.ready
+        yield voice_client.ready
         returnValue(voice_client)
 
     @inlineCallbacks
