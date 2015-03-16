@@ -131,6 +131,9 @@ class FreeSwitchESLProtocol(EventProtocol):
     def unboundEvent(self, evdata, evname):
         log.msg("Unbound event %r" % (evname,))
 
+class ClientConnectError(Exception):
+    pass
+
 
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
     def __init__(self, vumi_transport):
@@ -149,11 +152,16 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             response = Deferred()
             self.job_queue[ev.Job_UUID] = response
             return response
+
+        def _error(err):
+            raise ClientConnectError(err)
+
         self.uniquecallid = number
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, number)
         d = self.bgapi("originate %s" % (call_url))
         d.addCallback(_success)
+        d.addErrback(_error)
         return d
 
     def onBackgroundJob(self, ev):
@@ -162,6 +170,8 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             response, content = ev.rawresponse.split()
             if response == "+OK":
                 d.callback(content)
+            else:
+                d.errback(ev)
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
@@ -359,7 +369,13 @@ class VoiceServerTransport(Transport):
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
             client = yield self.create_voice_client()
-            yield client.make_call(message['to_addr'])
+            try:
+                yield client.make_call(message['to_addr'])
+            except ClientConnectError:
+                yield self.publish_nack(
+                    message["message_id"],
+                    "Could not make call to client %r" % (client_addr,))
+                return
             self.register_client(client)
 
         if client is None:
