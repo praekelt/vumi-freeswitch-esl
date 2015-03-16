@@ -134,8 +134,7 @@ class FreeSwitchESLProtocol(EventProtocol):
 
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
     def __init__(self, vumi_transport):
-        EventProtocol.__init__(self)
-        self.vumi_transport = vumi_transport
+        FreeSwitchESLProtocol.__init__(self, vumi_transport)
         self.job_queue = {}
         self.ready = Deferred()
 
