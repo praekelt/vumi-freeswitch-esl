@@ -488,8 +488,11 @@ class RecordingServer(Protocol):
         content = (
             'Content-Length: %s\n' % (len(uuid) + 4) +
             'Event-Name: BACKGROUND_JOB\n' +
-            'Job-UUID: %s\n\n' % uuid +
-            '+OK %s\n' % uuid)
+            'Job-UUID: %s\n\n' % uuid)
+        if self.factory.fail_connect:
+            content += '+ERROR %s\n' % uuid
+        else:
+            content += '+OK %s\n' % uuid
         self._send_event(content)
 
     def hangup(self):
@@ -502,6 +505,8 @@ class RecordingServerFactory(protocol.Factory):
     protocol = RecordingServer
     data = []
     clients = []
+    fail_connect = False
+
 
 
 class TestVoiceClientTransport(VumiTestCase):
@@ -525,10 +530,19 @@ class TestVoiceClientTransport(VumiTestCase):
     @inlineCallbacks
     def disconnect_server(self):
         yield self.server.loseConnection()
+        for server in self.recording_factory.clients:
+            yield server.transport.loseConnection()
+            self.recording_factory.clients.remove(server)
 
     def disconnect_client(self, client):
         self.worker.deregister_client(client)
         client.transport.loseConnection()
+
+    @inlineCallbacks
+    def hangup_client(self, client):
+        [rec_server] = self.recording_factory.clients
+        rec_server.hangup()
+        yield client.registration_d
 
     @inlineCallbacks
     def test_create_call(self):
@@ -536,7 +550,7 @@ class TestVoiceClientTransport(VumiTestCase):
             'foobar', '12345', '54321', session_event='new')
         yield self.tx_helper.dispatch_outbound(msg)
         [client] = self.worker._clients.values()
-        self.disconnect_client(client)
+        yield self.disconnect_client(client)
         self.assertTrue('54321' in self.recording_factory.data[1])
         self.assertTrue('foobar' in self.recording_factory.data[-1])
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -551,9 +565,7 @@ class TestVoiceClientTransport(VumiTestCase):
         [client_addr] = self.worker._clients.keys()
         client = self.worker._clients[client_addr]
         self.assertTrue(client_addr in self.worker._clients)
-        [rec_server] = self.recording_factory.clients
-        rec_server.hangup()
-        yield client.registration_d
+        yield self.hangup_client(client)
         self.assertFalse(client_addr in self.worker._clients)
         [sent_msg, hangup_msg] = yield (
             self.tx_helper.wait_for_dispatched_inbound(1))
@@ -561,3 +573,15 @@ class TestVoiceClientTransport(VumiTestCase):
             hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
         self.assertEqual(
             hangup_msg['from_addr'], msg['to_addr'])
+
+    @inlineCallbacks
+    def test_connect_error(self):
+        self.recording_factory.fail_connect = True
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        [nack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(nack['user_message_id'], msg['message_id'])
+        self.assertEqual(nack['nack_reason'],
+                         "Could not make call to client u'54321'")
+
