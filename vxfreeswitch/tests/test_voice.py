@@ -178,7 +178,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
         self.recording_factory = RecordingServerFactory()
         self.server = yield self.recording_server.listen(
-                self.recording_factory)
+            self.recording_factory)
         self.tx_helper = self.add_helper(
             TransportHelper(self.transport_class))
         self.worker = yield self.tx_helper.get_transport({
@@ -320,7 +320,7 @@ class TestVoiceServerTransport(VumiTestCase):
         self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
         self.recording_factory = RecordingServerFactory()
         self.server = yield self.recording_server.listen(
-                self.recording_factory)
+            self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
@@ -480,7 +480,7 @@ class RecordingServer(Protocol):
         commands = self.command_parser.parse(line)
         self.factory.data.extend(commands)
         for cmd in commands:
-            uuid = '%s' % uuid4()
+            uuid = '%s' % self.factory.uuid()
             # Send job received correctly
             self.transport.write(
                 'Content-Type: command/reply\n'
@@ -488,14 +488,16 @@ class RecordingServer(Protocol):
                 'Job-UUID: %s\n\n' % uuid)
             if cmd.cmd_type.startswith('bgapi originate'):
                 # Send job complete success response
-                content = (
-                    'Content-Length: %s\n' % (len(uuid) + 4) +
-                    'Event-Name: BACKGROUND_JOB\n' +
-                    'Job-UUID: %s\n\n' % uuid)
                 if self.factory.fail_connect:
-                    content += '+ERROR %s\n' % uuid
+                    content_body = '+ERROR %s\n' % uuid
                 else:
-                    content += '+OK %s\n' % uuid
+                    content_body = '+OK %s\n' % uuid
+                content = (
+                    'Content-Length: %d\n'
+                    'Event-Name: BACKGROUND_JOB\n'
+                    'Job-UUID: %s\n\n'
+                    '%s' %
+                    (len(content_body), uuid, content_body))
                 self._send_event(content)
 
     def hangup(self):
@@ -511,6 +513,7 @@ class RecordingServerFactory(protocol.Factory):
         self.data = []
         self.clients = []
         self.fail_connect = False
+        self.uuid = uuid4
 
 
 class TestVoiceClientTransport(VumiTestCase):
@@ -583,10 +586,16 @@ class TestVoiceClientTransport(VumiTestCase):
     @inlineCallbacks
     def test_connect_error(self):
         self.recording_factory.fail_connect = True
+        self.recording_factory.uuid = lambda: 'uuid-1234'
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
-        yield self.tx_helper.dispatch_outbound(msg)
+        with LogCatcher(message='Error connecting') as lc:
+            yield self.tx_helper.dispatch_outbound(msg)
         [nack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Could not make call to client u'54321'")
+        self.assertEqual(lc.messages(), [
+            "Error connecting to client u'54321':"
+            " +ERROR uuid-1234",
+        ])
