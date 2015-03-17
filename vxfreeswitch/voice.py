@@ -173,7 +173,7 @@ class DialerFactory(ClientFactory):
         self.vumi_transport = vumi_transport
         self.number = number
 
-    def buildProtocol(self, addr):
+    def protocol(self):
         return FreeSwitchESLClientProtocol(self.vumi_transport, self.number)
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
