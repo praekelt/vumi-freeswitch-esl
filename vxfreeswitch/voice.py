@@ -133,24 +133,25 @@ class FreeSwitchESLProtocol(EventProtocol):
 
 
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
-    def __init__(self, vumi_transport):
+    def __init__(self, vumi_transport, number):
         FreeSwitchESLProtocol.__init__(self, vumi_transport)
+        self.uniquecallid = number
         self.job_queue = {}
         self.ready = Deferred()
 
     @inlineCallbacks
     def connectionMade(self):
         yield self.eventplain("BACKGROUND_JOB CHANNEL_HANGUP")
+        yield self.vumi_transport.register_client(self)
         self.ready.callback(self)
 
-    def make_call(self, number):
+    def make_call(self):
         def _success(ev):
             response = Deferred()
             self.job_queue[ev.Job_UUID] = response
             return response
-        self.uniquecallid = number
         profile = self.vumi_transport.config.sofia_profile
-        call_url = "sofia/%s/%s" % (profile, number)
+        call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
         d = self.bgapi("originate %s" % (call_url))
         d.addCallback(_success)
         return d
@@ -167,6 +168,13 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
         self.vumi_transport.deregister_client(self)
         yield self.transport.loseConnection()
 
+class DialerFactory(ClientFactory):
+    def __init__(self, vumi_transport, number):
+        self.vumi_transport = vumi_transport
+        self.number = number
+
+    def buildProtocol(self, addr):
+        return FreeSwitchESLClientProtocol(self.vumi_transport, self.number)
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
@@ -286,14 +294,13 @@ class VoiceServerTransport(Transport):
         factory.protocol = protocol
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
 
-        self.client_factory = ClientFactory()
-        self.client_factory.protocol = client_protocol
-
     @inlineCallbacks
-    def create_dialer_client(self):
+    def create_dialer_client(self, number):
+        factory = DialerFactory(self, number)
         voice_client = yield (
-            self.config.twisted_client_endpoint.connect(self.client_factory))
+            self.config.twisted_client_endpoint.connect(factory))
         yield voice_client.ready
+        yield voice_client.make_call()
         returnValue(voice_client)
 
     @inlineCallbacks
@@ -355,9 +362,7 @@ class VoiceServerTransport(Transport):
 
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
-            client = yield self.create_dialer_client()
-            yield client.make_call(message['to_addr'])
-            self.register_client(client)
+            client = yield self.create_dialer_client(message['to_addr'])
 
         if client is None:
             yield self.publish_nack(
