@@ -375,9 +375,11 @@ class VoiceServerTransport(Transport):
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
             try:
-                client = yield self.create_dialer_client(message['to_addr'])
+                client = yield self.create_dialer_client(client_addr)
                 yield client.make_call()
-            except ClientConnectError:
+            except ClientConnectError as e:
+                log.msg("Error connecting to client %r: %s" % (
+                    client_addr, e))
                 yield self.publish_nack(
                     message["message_id"],
                     "Could not make call to client %r" % (client_addr,))
