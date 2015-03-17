@@ -590,4 +590,3 @@ class TestVoiceClientTransport(VumiTestCase):
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Could not make call to client u'54321'")
-
