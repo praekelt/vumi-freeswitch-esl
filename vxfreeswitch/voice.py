@@ -156,7 +156,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             return response
 
         def _error(err):
-            raise ClientConnectError(err)
+            raise ClientConnectError(err.value)
 
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
