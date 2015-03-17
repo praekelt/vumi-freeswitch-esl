@@ -134,8 +134,7 @@ class FreeSwitchESLProtocol(EventProtocol):
 
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
     def __init__(self, vumi_transport):
-        EventProtocol.__init__(self)
-        self.vumi_transport = vumi_transport
+        FreeSwitchESLProtocol.__init__(self, vumi_transport)
         self.job_queue = {}
         self.ready = Deferred()
 
@@ -165,9 +164,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
-        client = self.vumi_transport._clients.get(self.uniquecallid)
-        if client:
-            self.vumi_transport.deregister_client(client)
+        self.vumi_transport.deregister_client(self)
         yield self.transport.loseConnection()
 
 
