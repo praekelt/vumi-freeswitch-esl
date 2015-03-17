@@ -500,8 +500,10 @@ class RecordingServer(Protocol):
 
 class RecordingServerFactory(protocol.Factory):
     protocol = RecordingServer
-    data = []
-    clients = []
+
+    def __init(self):
+        data = []
+        clients = []
 
 
 class TestVoiceClientTransport(VumiTestCase):
