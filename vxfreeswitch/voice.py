@@ -133,7 +133,7 @@ class FreeSwitchESLProtocol(EventProtocol):
 
 
 class ClientConnectError(Exception):
-    pass
+    """Error for when a call could not be established."""
 
 
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
