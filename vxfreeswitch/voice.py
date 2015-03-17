@@ -156,7 +156,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             return response
 
         def _error(err):
-            raise ClientConnectError(err.value)
+            raise ClientConnectError(err.value.ev)
 
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
@@ -172,7 +172,9 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             if response == "+OK":
                 d.callback(content)
             else:
-                d.errback(ev)
+                e = Exception("bgapi error")
+                e.ev = ev
+                d.errback(e)
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
