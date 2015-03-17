@@ -11,7 +11,7 @@ import os
 
 from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.internet.defer import (
-        inlineCallbacks, Deferred, gatherResults, returnValue)
+    inlineCallbacks, Deferred, gatherResults, returnValue)
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -132,6 +132,10 @@ class FreeSwitchESLProtocol(EventProtocol):
         log.msg("Unbound event %r" % (evname,))
 
 
+class ClientConnectError(Exception):
+    """Error for when a call could not be established."""
+
+
 class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
     def __init__(self, vumi_transport, number):
         FreeSwitchESLProtocol.__init__(self, vumi_transport)
@@ -142,18 +146,24 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
     @inlineCallbacks
     def connectionMade(self):
         yield self.eventplain("BACKGROUND_JOB CHANNEL_HANGUP")
-        yield self.vumi_transport.register_client(self)
+        yield self.vumi_transport.register_client(self, send_inbound=False)
         self.ready.callback(self)
 
     def make_call(self):
         def _success(ev):
-            response = Deferred()
-            self.job_queue[ev.Job_UUID] = response
+            response = self.job_queue[ev.Job_UUID] = Deferred()
             return response
+
+        def _error(f):
+            if f.check(ClientConnectError):
+                return f
+            raise ClientConnectError(str(f.value))
+
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
         d = self.bgapi("originate %s" % (call_url))
         d.addCallback(_success)
+        d.addErrback(_error)
         return d
 
     def onBackgroundJob(self, ev):
@@ -162,11 +172,14 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             response, content = ev.rawresponse.split()
             if response == "+OK":
                 d.callback(content)
+            else:
+                d.errback(ClientConnectError(ev.rawresponse.strip()))
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
         self.vumi_transport.deregister_client(self)
         yield self.transport.loseConnection()
+
 
 class DialerFactory(ClientFactory):
     def __init__(self, vumi_transport, number):
@@ -175,6 +188,7 @@ class DialerFactory(ClientFactory):
 
     def protocol(self):
         return FreeSwitchESLClientProtocol(self.vumi_transport, self.number)
+
 
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
@@ -287,9 +301,6 @@ class VoiceServerTransport(Transport):
         def protocol():
             return FreeSwitchESLProtocol(self)
 
-        def client_protocol():
-            return FreeSwitchESLClientProtocol(self)
-
         factory = ServerFactory()
         factory.protocol = protocol
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
@@ -300,7 +311,6 @@ class VoiceServerTransport(Transport):
         voice_client = yield (
             self.config.twisted_client_endpoint.connect(factory))
         yield voice_client.ready
-        yield voice_client.make_call()
         returnValue(voice_client)
 
     @inlineCallbacks
@@ -316,15 +326,16 @@ class VoiceServerTransport(Transport):
             self.voice_server.loseConnection()
             yield wait_for_closed
 
-    def register_client(self, client):
+    def register_client(self, client, send_inbound=True):
         # We add our own Deferred to the client here because we only want to
         # fire it after we're finished with our own deregistration process.
         client.registration_d = Deferred()
         client_addr = client.get_address()
         log.msg("Registering client connected from %r" % client_addr)
         self._clients[client_addr] = client
-        self.send_inbound_message(client, None,
-                                  TransportUserMessage.SESSION_NEW)
+        if send_inbound:
+            self.send_inbound_message(
+                client, None, TransportUserMessage.SESSION_NEW)
         log.msg("Register completed")
 
     def deregister_client(self, client):
@@ -362,7 +373,17 @@ class VoiceServerTransport(Transport):
 
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
-            client = yield self.create_dialer_client(message['to_addr'])
+            try:
+                client = yield self.create_dialer_client(client_addr)
+                yield client.make_call()
+            except ClientConnectError as e:
+                log.msg("Error connecting to client %r: %s" % (
+                    client_addr, e))
+                yield self.publish_nack(
+                    message["message_id"],
+                    "Could not make call to client %r" % (client_addr,))
+                self.deregister_client(client)
+                return
 
         if client is None:
             yield self.publish_nack(
