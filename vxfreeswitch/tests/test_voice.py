@@ -573,7 +573,6 @@ class TestVoiceClientTransport(VumiTestCase):
         self.assertTrue(client_addr in self.worker._clients)
         yield self.hangup_client(client)
         self.assertFalse(client_addr in self.worker._clients)
-        foo = yield self.tx_helper.wait_for_dispatched_inbound(1)
         [hangup_msg] = yield (
             self.tx_helper.wait_for_dispatched_inbound(1))
         self.assertEqual(
