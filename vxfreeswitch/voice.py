@@ -9,8 +9,9 @@ through as a vumi message
 import md5
 import os
 
-from twisted.internet.protocol import ServerFactory
-from twisted.internet.defer import inlineCallbacks, Deferred, gatherResults
+from twisted.internet.protocol import ServerFactory, ClientFactory
+from twisted.internet.defer import (
+        inlineCallbacks, Deferred, gatherResults, returnValue)
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -18,7 +19,7 @@ from eventsocket import EventProtocol
 
 from vumi.transports import Transport
 from vumi.message import TransportUserMessage
-from vumi.config import ConfigServerEndpoint, ConfigText
+from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint, ConfigText
 from vumi.errors import VumiError
 
 
@@ -131,6 +132,50 @@ class FreeSwitchESLProtocol(EventProtocol):
         log.msg("Unbound event %r" % (evname,))
 
 
+class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
+    def __init__(self, vumi_transport, number):
+        FreeSwitchESLProtocol.__init__(self, vumi_transport)
+        self.uniquecallid = number
+        self.job_queue = {}
+        self.ready = Deferred()
+
+    @inlineCallbacks
+    def connectionMade(self):
+        yield self.eventplain("BACKGROUND_JOB CHANNEL_HANGUP")
+        yield self.vumi_transport.register_client(self)
+        self.ready.callback(self)
+
+    def make_call(self):
+        def _success(ev):
+            response = Deferred()
+            self.job_queue[ev.Job_UUID] = response
+            return response
+        profile = self.vumi_transport.config.sofia_profile
+        call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
+        d = self.bgapi("originate %s" % (call_url))
+        d.addCallback(_success)
+        return d
+
+    def onBackgroundJob(self, ev):
+        d = self.job_queue.pop(ev.Job_UUID, None)
+        if d:
+            response, content = ev.rawresponse.split()
+            if response == "+OK":
+                d.callback(content)
+
+    @inlineCallbacks
+    def onChannelHangup(self, ev):
+        self.vumi_transport.deregister_client(self)
+        yield self.transport.loseConnection()
+
+class DialerFactory(ClientFactory):
+    def __init__(self, vumi_transport, number):
+        self.vumi_transport = vumi_transport
+        self.number = number
+
+    def protocol(self):
+        return FreeSwitchESLClientProtocol(self.vumi_transport, self.number)
+
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
     Configuration parameters for the voice transport
@@ -173,6 +218,16 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
         "The endpoint the voice transport will listen on (and that Freeswitch"
         " will connect to).",
         required=True, default="tcp:port=8084", static=True)
+
+    twisted_client_endpoint = ConfigClientEndpoint(
+        "The endpoint the voice transport will send commands to (and that "
+        "Freeswitch will listen to).",
+        required=True, default=None, static=True)
+
+    sofia_profile = ConfigText(
+        "The name of the sofia profile defined in sofia.conf.xml in "
+        "FreeSwitch.",
+        default="$${profile}", static=True)
 
 
 class VoiceServerTransport(Transport):
@@ -232,10 +287,21 @@ class VoiceServerTransport(Transport):
         def protocol():
             return FreeSwitchESLProtocol(self)
 
+        def client_protocol():
+            return FreeSwitchESLClientProtocol(self)
+
         factory = ServerFactory()
         factory.protocol = protocol
-
         self.voice_server = yield self.config.twisted_endpoint.listen(factory)
+
+    @inlineCallbacks
+    def create_dialer_client(self, number):
+        factory = DialerFactory(self, number)
+        voice_client = yield (
+            self.config.twisted_client_endpoint.connect(factory))
+        yield voice_client.ready
+        yield voice_client.make_call()
+        returnValue(voice_client)
 
     @inlineCallbacks
     def teardown_transport(self):
@@ -293,6 +359,11 @@ class VoiceServerTransport(Transport):
 
         client_addr = message['to_addr']
         client = self._clients.get(client_addr)
+
+        if (client is None and message.get('session_event') ==
+                TransportUserMessage.SESSION_NEW):
+            client = yield self.create_dialer_client(message['to_addr'])
+
         if client is None:
             yield self.publish_nack(
                 message["message_id"],
