@@ -293,7 +293,7 @@ class VoiceServerTransport(Transport):
         self.client_factory.protocol = client_protocol
 
     @inlineCallbacks
-    def create_voice_client(self):
+    def create_dialer_client(self):
         voice_client = yield (
             self.config.twisted_client_endpoint.connect(self.client_factory))
         yield voice_client.ready
@@ -358,7 +358,7 @@ class VoiceServerTransport(Transport):
 
         if (client is None and message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
-            client = yield self.create_voice_client()
+            client = yield self.create_dialer_client()
             yield client.make_call(message['to_addr'])
             self.register_client(client)
 
