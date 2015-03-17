@@ -11,7 +11,7 @@ import os
 
 from twisted.internet.protocol import ServerFactory, ClientFactory
 from twisted.internet.defer import (
-        inlineCallbacks, Deferred, gatherResults, returnValue)
+    inlineCallbacks, Deferred, gatherResults, returnValue)
 from twisted.internet.utils import getProcessOutput
 from twisted.python import log
 
@@ -151,12 +151,13 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
 
     def make_call(self):
         def _success(ev):
-            response = Deferred()
-            self.job_queue[ev.Job_UUID] = response
+            response = self.job_queue[ev.Job_UUID] = Deferred()
             return response
 
-        def _error(err):
-            raise ClientConnectError(err.value.ev)
+        def _error(f):
+            if f.check(ClientConnectError):
+                return f
+            raise ClientConnectError(str(f.value))
 
         profile = self.vumi_transport.config.sofia_profile
         call_url = "sofia/%s/%s" % (profile, self.uniquecallid)
@@ -172,9 +173,7 @@ class FreeSwitchESLClientProtocol(FreeSwitchESLProtocol):
             if response == "+OK":
                 d.callback(content)
             else:
-                e = Exception("bgapi error")
-                e.ev = ev
-                d.errback(e)
+                d.errback(ClientConnectError(ev.rawresponse.strip()))
 
     @inlineCallbacks
     def onChannelHangup(self, ev):
