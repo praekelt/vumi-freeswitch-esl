@@ -184,7 +184,6 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
             'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
-
         self.tr = EslTransport()
 
         self.proto = FreeSwitchESLProtocol(self.worker)
@@ -465,6 +464,9 @@ class TestVoiceServerTransport(VumiTestCase):
 
 
 class RecordingServer(Protocol):
+    def __init__(self):
+        self.command_parser = EslParser()
+
     def connectionMade(self):
         self.factory.clients.append(self)
 
@@ -475,22 +477,23 @@ class RecordingServer(Protocol):
             content)
 
     def dataReceived(self, line):
-        self.factory.data.append(line)
-        uuid = '%s' % uuid4()
-        # Send server immediate response
-        self.transport.write(
-            'Content-Type: command/reply\n'
-            'Reply-Text: +OK\n'
-            'Job-UUID: %s\n\n' % uuid)
-        # Send job complete success response
-        if not line.startswith('bgapi originate'):
-            return
-        content = (
-            'Content-Length: %s\n' % (len(uuid) + 4) +
-            'Event-Name: BACKGROUND_JOB\n' +
-            'Job-UUID: %s\n\n' % uuid +
-            '+OK %s\n' % uuid)
-        self._send_event(content)
+        commands = self.command_parser.parse(line)
+        self.factory.data.extend(commands)
+        for cmd in commands:
+            uuid = '%s' % uuid4()
+            # Send job received correctly
+            self.transport.write(
+                'Content-Type: command/reply\n'
+                'Reply-Text: +OK\n'
+                'Job-UUID: %s\n\n' % uuid)
+            if cmd.cmd_type.startswith('bgapi'):
+                # Send job complete success response
+                content = (
+                    'Content-Length: %s\n' % (len(uuid) + 4) +
+                    'Event-Name: BACKGROUND_JOB\n' +
+                    'Job-UUID: %s\n\n' % uuid +
+                    '+OK %s\n' % uuid)
+                self._send_event(content)
 
     def hangup(self):
         content = (
@@ -501,9 +504,9 @@ class RecordingServer(Protocol):
 class RecordingServerFactory(protocol.Factory):
     protocol = RecordingServer
 
-    def __init(self):
-        data = []
-        clients = []
+    def __init__(self):
+        self.data = []
+        self.clients = []
 
 
 class TestVoiceClientTransport(VumiTestCase):
@@ -539,8 +542,10 @@ class TestVoiceClientTransport(VumiTestCase):
         yield self.tx_helper.dispatch_outbound(msg)
         [client] = self.worker._clients.values()
         self.disconnect_client(client)
-        self.assertTrue('54321' in self.recording_factory.data[1])
-        self.assertTrue('foobar' in self.recording_factory.data[-1])
+        self.assertTrue('54321' in self.recording_factory.data[1].cmd_type)
+        self.assertTrue(
+            'foobar' in
+            self.recording_factory.data[-1].params['execute-app-arg'])
         [ack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
