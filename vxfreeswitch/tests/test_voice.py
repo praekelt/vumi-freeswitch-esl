@@ -3,12 +3,14 @@
 """Tests for vxfreeswitch.voice."""
 
 import md5
+from uuid import uuid4
 import os
 
 from twisted.internet.defer import (
     inlineCallbacks, DeferredQueue, returnValue, Deferred)
+from twisted.internet.protocol import Protocol
 from twisted.protocols.basic import LineReceiver
-from twisted.internet import reactor, protocol
+from twisted.internet import reactor, protocol, endpoints
 from twisted.test.proto_helpers import StringTransport
 
 from vumi.message import TransportUserMessage
@@ -173,11 +175,15 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(
+            self.recording_factory)
         self.tx_helper = self.add_helper(
             TransportHelper(self.transport_class))
-        self.worker = yield self.tx_helper.get_transport(
-            {'twisted_endpoint': 'tcp:port=0'})
-
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
         self.tr = EslTransport()
 
         self.proto = FreeSwitchESLProtocol(self.worker)
@@ -185,6 +191,11 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
         self.voice_cache_folder = self.mktemp()
         os.mkdir(self.voice_cache_folder)
+        self.add_cleanup(self.disconnect_server)
+
+    @inlineCallbacks
+    def disconnect_server(self):
+        yield self.server.loseConnection()
 
     def send_event(self, params):
         for key, value in params:
@@ -306,9 +317,14 @@ class TestVoiceServerTransport(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(
+            self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
-        self.worker = yield self.tx_helper.get_transport(
-            {'twisted_endpoint': 'tcp:port=0'})
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
         self.client = yield self.make_client()
         self.add_cleanup(self.wait_for_client_deregistration)
         yield self.wait_for_client_start()
@@ -320,6 +336,7 @@ class TestVoiceServerTransport(VumiTestCase):
             self.client.transport.loseConnection()
             yield self.client.disconnect_d
             yield self.tx_helper.kick_delivery()
+        yield self.server.loseConnection()
 
     def wait_for_client_start(self):
         return self.client.connect_d
@@ -444,3 +461,141 @@ class TestVoiceServerTransport(VumiTestCase):
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Client u'TESTTEST' no longer connected")
+
+
+class RecordingServer(Protocol):
+    def __init__(self):
+        self.command_parser = EslParser()
+
+    def connectionMade(self):
+        self.factory.clients.append(self)
+
+    def _send_event(self, content):
+        self.transport.write(
+            'Content-Length: %s\n' % len(content) +
+            'Content-Type: text/event-plain\n\n' +
+            content)
+
+    def dataReceived(self, line):
+        commands = self.command_parser.parse(line)
+        self.factory.data.extend(commands)
+        for cmd in commands:
+            uuid = '%s' % self.factory.uuid()
+            # Send job received correctly
+            self.transport.write(
+                'Content-Type: command/reply\n'
+                'Reply-Text: +OK\n'
+                'Job-UUID: %s\n\n' % uuid)
+            if cmd.cmd_type.startswith('bgapi originate'):
+                # Send job complete success response
+                if self.factory.fail_connect:
+                    content_body = '+ERROR %s\n' % uuid
+                else:
+                    content_body = '+OK %s\n' % uuid
+                content = (
+                    'Content-Length: %d\n'
+                    'Event-Name: BACKGROUND_JOB\n'
+                    'Job-UUID: %s\n\n'
+                    '%s' %
+                    (len(content_body), uuid, content_body))
+                self._send_event(content)
+
+    def hangup(self):
+        content = (
+            'Event-Name: CHANNEL_HANGUP\n')
+        self._send_event(content)
+
+
+class RecordingServerFactory(protocol.Factory):
+    protocol = RecordingServer
+
+    def __init__(self):
+        self.data = []
+        self.clients = []
+        self.fail_connect = False
+        self.uuid = uuid4
+
+
+class TestVoiceClientTransport(VumiTestCase):
+
+    transport_class = VoiceServerTransport
+    transport_type = 'voice'
+
+    @inlineCallbacks
+    def setUp(self):
+        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
+        self.recording_factory = RecordingServerFactory()
+        self.server = yield self.recording_server.listen(
+            self.recording_factory)
+        self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
+        self.worker = yield self.tx_helper.get_transport({
+            'twisted_endpoint': 'tcp:port=0',
+            'twisted_client_endpoint': 'tcp:127.0.0.1:port=1337',
+        })
+        self.add_cleanup(self.disconnect_server)
+
+    @inlineCallbacks
+    def disconnect_server(self):
+        yield self.server.loseConnection()
+        for server in self.recording_factory.clients:
+            yield server.transport.loseConnection()
+            self.recording_factory.clients.remove(server)
+
+    def disconnect_client(self, client):
+        self.worker.deregister_client(client)
+        client.transport.loseConnection()
+
+    @inlineCallbacks
+    def hangup_client(self, client):
+        [rec_server] = self.recording_factory.clients
+        rec_server.hangup()
+        yield client.registration_d
+
+    @inlineCallbacks
+    def test_create_call(self):
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        [client] = self.worker._clients.values()
+        yield self.disconnect_client(client)
+        self.assertTrue('54321' in self.recording_factory.data[1].cmd_type)
+        self.assertTrue(
+            'foobar' in
+            self.recording_factory.data[-1].params['execute-app-arg'])
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_channel_hangup(self):
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        [client_addr] = self.worker._clients.keys()
+        client = self.worker._clients[client_addr]
+        self.assertTrue(client_addr in self.worker._clients)
+        yield self.hangup_client(client)
+        self.assertFalse(client_addr in self.worker._clients)
+        [hangup_msg] = yield (
+            self.tx_helper.wait_for_dispatched_inbound(1))
+        self.assertEqual(
+            hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
+        self.assertEqual(
+            hangup_msg['from_addr'], msg['to_addr'])
+
+    @inlineCallbacks
+    def test_connect_error(self):
+        self.recording_factory.fail_connect = True
+        self.recording_factory.uuid = lambda: 'uuid-1234'
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        with LogCatcher(message='Error connecting') as lc:
+            yield self.tx_helper.dispatch_outbound(msg)
+        [nack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(nack['user_message_id'], msg['message_id'])
+        self.assertEqual(nack['nack_reason'],
+                         "Could not make call to client u'54321'")
+        self.assertEqual(lc.messages(), [
+            "Error connecting to client u'54321':"
+            " +ERROR uuid-1234",
+        ])
