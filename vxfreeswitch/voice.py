@@ -216,7 +216,7 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
                 " given.")
         if any(outbound_supplied):
             try:
-                OriginateFormatter.format_template(**self.originate_parameters)
+                OriginateFormatter(**self.originate_parameters)
             except OriginateMissingParameter as err:
                 raise ConfigError(str(err))
 
