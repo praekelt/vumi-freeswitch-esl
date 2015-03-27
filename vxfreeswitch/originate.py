@@ -5,8 +5,8 @@ Utilities for creating originate FreeSwitch API calls.
 """
 
 
-class OriginateParamsError(Exception):
-    """ Error raised while formatting originate call parameters. """
+class OriginateMissingParameter(Exception):
+    """ Raised if required originate parameters are missing. """
 
 
 class OriginateFormatter(object):
@@ -111,5 +111,5 @@ class OriginateFormatter(object):
         try:
             return cls.PROTO_TEMPLATE % d
         except KeyError as err:
-            raise OriginateParamsError(
-                "Missing originate parameter '%s'" % err)
+            raise OriginateMissingParameter(
+                "Missing originate parameter %s" % err)
