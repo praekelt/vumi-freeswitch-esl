@@ -1,9 +1,15 @@
 # -*- test-case-name: vxfreeswitch.tests.test_voice -*-
 
-"""
-Transport that sends text as voice to a standard SIP client via
-the Freeswitch ESL interface. Keypad input from the phone is sent
-through as a vumi message
+"""A Vumi transport for connecting to SIP gateways via FreeSWITCH's ESL
+interfaces.
+
+If outbound messages provide a URL to a pre-recorded audio message,
+that is played via SIP. Otherwise sound is generated using a
+text-to-speech engine.
+
+DTMF digits dialed on the phone are collected by the transport and
+sent as inbound messages. Digits may either be sent through individually
+(the default) or collected until a specified character is pressed.
 """
 
 import md5
@@ -13,7 +19,6 @@ from twisted.internet.protocol import ServerFactory
 from twisted.internet.defer import (
     inlineCallbacks, Deferred, gatherResults)
 from twisted.internet.utils import getProcessOutput
-from twisted.python import log
 
 from eventsocket import EventProtocol
 
@@ -24,9 +29,11 @@ from vumi.transports import Transport
 from vumi.message import TransportUserMessage
 from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint
 from vumi.errors import VumiError
+from vumi import log
 
 from vxfreeswitch.originate import (
     OriginateFormatter, OriginateMissingParameter)
+from vxfreeswitch.client import FreeSwitchClient, FreeSwitchClientError
 
 
 class VoiceError(VumiError):
@@ -138,6 +145,15 @@ class FreeSwitchESLProtocol(EventProtocol):
         log.msg("Unbound event %r" % (evname,))
 
 
+class FreeSwitchESLFactory(ServerFactory):
+    """ FreeSwitch ESL server factory. """
+    def __init__(self, vumi_transport):
+        self.vumi_transport = vumi_transport
+
+    def protocol(self):
+        return FreeSwitchESLProtocol(self.vumi_transport)
+
+
 class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     """
     Configuration parameters for the voice transport
@@ -184,12 +200,12 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
     freeswitch_endpoint = ConfigClientEndpoint(
         "The endpoint the voice transport will send originate commands"
         "to (and that Freeswitch listens on).",
-        required=True, default=None, static=True)
+        default=None, static=True)
 
     freeswitch_auth = ConfigText(
         "Password for connecting to the Freeswitch endpoint."
         " None means no authentication credentials are offered.",
-        required=True, default=None, static=True)
+        default=None, static=True)
 
     originate_parameters = ConfigDict(
         "The parameters to pass to the originate command when initiating"
@@ -202,19 +218,23 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
             'template': OriginateFormatter.PROTO_TEMPLATE,
             'defaults': OriginateFormatter.DEFAULT_PARAMS,
         },
-        required=True, default=None, static=True)
+        default=None, static=True)
+
+    @property
+    def supports_outbound(self):
+        return self.freeswitch_endpoint is not None
 
     def post_validate(self):
         super(VoiceServerTransportConfig, self).post_validate()
-        outbound_supplied = (
-            self.freeswitch_endpoint is None,
-            self.originate_parameters is None)
-        if any(outbound_supplied) and not all(outbound_supplied):
+        required_outbound = (
+            self.freeswitch_endpoint is not None,
+            self.originate_parameters is not None)
+        if self.supports_outbound and not all(required_outbound):
             raise ConfigError(
                 "If any outbound message parameters are supplied"
                 " (freeswitch_endpoint or originate_params), all must be"
                 " given.")
-        if any(outbound_supplied):
+        if self.originate_parameters is not None:
             try:
                 OriginateFormatter(**self.originate_parameters)
             except OriginateMissingParameter as err:
@@ -246,14 +266,6 @@ class VoiceServerTransport(Transport):
       transport config) the voice transport will timeout the wait
       and send the characters entered so far.
 
-      .. todo:
-
-         Maybe ``wait_for`` should default to ``#``? It's not
-         discoverable but at least it makes it possible to enter
-         multi-digit numbers by default and it's probably simpler
-         to add a bit of help text to an application that to
-         update it to send ``helper_metadata``.
-
     Example ``helper_metadata``::
 
       "helper_metadata": {
@@ -268,19 +280,24 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def setup_transport(self):
-        log.msg("TRACE: Set Up Transport")
         self._clients = {}
+        self._originated_calls = {}
 
         self.config = self.get_static_config()
         self._to_addr = self.config.to_addr
         self._transport_type = "voice"
 
-        def protocol():
-            return FreeSwitchESLProtocol(self)
+        if self.config.supports_outbound:
+            self.voice_client = FreeSwitchClient(
+                self.config.freeswitch_endpoint, self.config.freeswitch_auth)
+            self.originate_formatter = OriginateFormatter(
+                **self.config.originate_parameters)
+        else:
+            self.voice_client = None
+            self.originate_formatter = None
 
-        factory = ServerFactory()
-        factory.protocol = protocol
-        self.voice_server = yield self.config.twisted_endpoint.listen(factory)
+        self.voice_server = yield self.config.twisted_endpoint.listen(
+            FreeSwitchESLFactory(self))
 
     @inlineCallbacks
     def teardown_transport(self):
@@ -288,35 +305,41 @@ class VoiceServerTransport(Transport):
             # We need to wait for all the client connections to be closed (and
             # their deregistration messages sent) before tearing down the rest
             # of the transport.
-            log.msg("TRACE: self._clients=%s" % (self._clients,))
-            wait_for_closed = gatherResults([
-                client.registration_d for client in self._clients.values()])
+            log.info("Shutting down %d clients." % len(self._clients))
             self.voice_server.loseConnection()
-            yield wait_for_closed
+            yield gatherResults([
+                client.registration_d for client in self._clients.values()])
 
+    @inlineCallbacks
     def register_client(self, client):
         # We add our own Deferred to the client here because we only want to
         # fire it after we're finished with our own deregistration process.
         client.registration_d = Deferred()
         client_addr = client.get_address()
-        log.msg("Registering client connected from %r" % client_addr)
+        log.info("Registering client connected from %r" % (client_addr,))
         self._clients[client_addr] = client
-        self.send_inbound_message(
-            client, None, TransportUserMessage.SESSION_NEW)
-        log.msg("Register completed")
+        originated_msg = self._originated_calls.pop(client_addr, None)
+        if originated_msg is not None:
+            yield self.send_outbound_message(client, originated_msg)
+        else:
+            self.send_inbound_message(
+                client, None, TransportUserMessage.SESSION_NEW)
+        log.info("Registration complete.")
 
     def deregister_client(self, client):
-        log.msg("TRACE: Deregistering client.")
         client_addr = client.get_address()
-        if client_addr in self._clients:
-            del self._clients[client_addr]
-            self.send_inbound_message(
-                client, None, TransportUserMessage.SESSION_CLOSE)
-            client.registration_d.callback(None)
+        if client_addr not in self._clients:
+            return
+        log.info("Deregistering client connected from %r" % (client_addr,))
+        del self._clients[client_addr]
+        self.send_inbound_message(
+            client, None, TransportUserMessage.SESSION_CLOSE)
+        client.registration_d.callback(None)
+        log.info("Deregistration complete.")
 
     def handle_input(self, client, text):
-        self.send_inbound_message(client, text,
-                                  TransportUserMessage.SESSION_RESUME)
+        self.send_inbound_message(
+            client, text, TransportUserMessage.SESSION_RESUME)
 
     def send_inbound_message(self, client, text, session_event):
         self.publish_message(
@@ -329,37 +352,13 @@ class VoiceServerTransport(Transport):
         )
 
     @inlineCallbacks
-    def handle_outbound_message(self, message):
-        text = message['content']
-        if text is None:
-            text = u''
-        text = u"\n".join(text.splitlines())
+    def send_outbound_message(self, client, message):
+        content = message['content']
+        if content is None:
+            content = u''
+        content = u"\n".join(content.splitlines())
+        content = content.encode('utf-8')
 
-        client_addr = message['to_addr']
-        client = self._clients.get(client_addr)
-
-        if (client is None and message.get('session_event') ==
-                TransportUserMessage.SESSION_NEW):
-            try:
-                # save call-id and stash for handling in inbound so
-                # we can fire the ack or nack when the message is returned
-                yield self.dial_outbound(client_addr)
-            except OutboundDialerError as e:
-                log.msg("Error connecting to client %r: %s" % (
-                    client_addr, e))
-                yield self.publish_nack(
-                    message["message_id"],
-                    "Could not make call to client %r" % (client_addr,))
-                self.deregister_client(client)
-            return
-
-        if client is None:
-            yield self.publish_nack(
-                message["message_id"],
-                "Client %r no longer connected" % (client_addr,))
-            return
-
-        text = text.encode('utf-8')
         overrideURL = None
         client.set_input_type(None)
         if 'helper_metadata' in message:
@@ -370,7 +369,7 @@ class VoiceServerTransport(Transport):
                 overrideURL = voicemeta.get('speech_url', None)
 
         if overrideURL is None:
-            yield client.output_message("%s\n" % text)
+            yield client.output_message("%s\n" % content)
         else:
             yield client.output_stream(overrideURL)
 
@@ -378,3 +377,38 @@ class VoiceServerTransport(Transport):
             client.close_call()
 
         yield self.publish_ack(message["message_id"], message["message_id"])
+
+    @inlineCallbacks
+    def dial_outbound(self, to_addr):
+        yield self.voice_client.api(
+            self.originate_formatter.format_call(self._to_addr, to_addr))
+
+    @inlineCallbacks
+    def handle_outbound_message(self, message):
+
+        client_addr = message['to_addr']
+        client = self._clients.get(client_addr)
+
+        if (self.config.supports_outbound and
+            client is None and
+            message.get('session_event') ==
+                TransportUserMessage.SESSION_NEW):
+            try:
+                yield self.dial_outbound(client_addr)
+            except FreeSwitchClientError as e:
+                log.msg("Error connecting to client %r: %s" % (
+                    client_addr, e))
+                yield self.publish_nack(
+                    message["message_id"],
+                    "Could not make call to client %r" % (client_addr,))
+            else:
+                self._originated_calls[client_addr] = message
+            return
+
+        if client is None:
+            yield self.publish_nack(
+                message["message_id"],
+                "Client %r no longer connected" % (client_addr,))
+            return
+
+        yield self.send_outbound_message(client, message)
