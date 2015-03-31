@@ -3,15 +3,11 @@
 """Tests for vxfreeswitch.voice."""
 
 import md5
-from uuid import uuid4
 import os
 
-from twisted.internet.defer import (
-    inlineCallbacks, DeferredQueue, returnValue, Deferred)
-from twisted.internet.protocol import Protocol
-from twisted.protocols.basic import LineReceiver
-from twisted.internet import reactor, protocol, endpoints
-from twisted.test.proto_helpers import StringTransport
+from twisted.internet.defer import inlineCallbacks, returnValue
+from twisted.internet.protocol import ClientFactory
+from twisted.internet import reactor
 
 from vumi.message import TransportUserMessage
 from vumi.tests.helpers import VumiTestCase
@@ -20,154 +16,13 @@ from vumi.transports.tests.helpers import TransportHelper
 
 from vxfreeswitch import VoiceServerTransport
 from vxfreeswitch.voice import FreeSwitchESLProtocol
-
-
-class EslCommand(object):
-    """
-    An object representing an ESL command.
-    """
-    def __init__(self, cmd_type, params=None):
-        self.cmd_type = cmd_type
-        self.params = params if params is not None else {}
-
-    def __repr__(self):
-        return "<%s cmd_type=%r params=%r>" % (
-            self.__class__.__name__, self.cmd_type, self.params)
-
-    def __eq__(self, other):
-        if not isinstance(other, EslCommand):
-            return NotImplemented
-        return (self.cmd_type == other.cmd_type and
-                self.params == other.params)
-
-    def __getitem__(self, name):
-        return self.params.get(name)
-
-    def __setitem__(self, name, value):
-        self.params[name] = value
-
-    @classmethod
-    def from_dict(cls, d):
-        """
-        Convert a dict to an :class:`EslCommand`.
-        """
-        cmd_type = d.get("type")
-        params = {
-            "call-command": d.get("call-command", "execute"),
-            "event-lock": d.get("event-lock", "true"),
-        }
-        if "name" in d:
-            params["execute-app-name"] = d.get("name")
-        if "arg" in d:
-            params["execute-app-arg"] = d.get("arg")
-        return cls(cmd_type, params)
-
-
-class EslParser(object):
-    """
-    Simple in-efficient parser for the FreeSwitch eventsocket protocol.
-    """
-
-    def __init__(self):
-        self.data = ""
-
-    def parse(self, new_data):
-        data = self.data + new_data
-        cmds = []
-        while "\n\n" in data:
-            cmd_data, data = data.split("\n\n", 1)
-            command = EslCommand("unknown")
-            first_line = True
-            for line in cmd_data.splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                if first_line:
-                    command.cmd_type = line.strip()
-                    first_line = False
-                    continue
-                if ":" in line:
-                    key, value = line.split(":", 1)
-                    command[key] = value.strip()
-            cmds.append(command)
-        self.data = data
-        return cmds
-
-
-class FakeFreeswitchProtocol(LineReceiver):
-
-    testAddr = 'TESTTEST'
-
-    def __init__(self):
-        self.esl_parser = EslParser()
-        self.queue = DeferredQueue()
-        self.connect_d = Deferred()
-        self.disconnect_d = Deferred()
-        self.setRawMode()
-
-    def connectionMade(self):
-        self.connected = True
-        self.connect_d.callback(None)
-
-    def sendPlainEvent(self, name, params=None):
-        params = {} if params is None else params
-        params['Event-Name'] = name
-        data = "\n".join("%s: %s" % (k, v) for k, v in params.items()) + "\n"
-        self.sendLine(
-            'Content-Length: %d\nContent-Type: text/event-plain\n\n%s' %
-            (len(data), data))
-
-    def sendCommandReply(self, params=""):
-        self.sendLine('Content-Type: command/reply\nReply-Text: +OK\n%s\n\n' %
-                      params)
-
-    def sendChannelHangupEvent(self):
-        self.sendPlainEvent('Channel_Hangup')
-
-    def sendDtmfEvent(self, digit):
-        self.sendPlainEvent('DTMF', {
-            'DTMF-Digit': digit,
-        })
-
-    def sendDisconnectEvent(self):
-        self.sendLine('Content-Type: text/disconnect-notice\n\n')
-
-    def rawDataReceived(self, data):
-        for cmd in self.esl_parser.parse(data):
-            if cmd.cmd_type == "connect":
-                self.sendCommandReply('variable-call-uuid: %s' % self.testAddr)
-            elif cmd.cmd_type == "myevents":
-                self.sendCommandReply()
-            elif cmd.cmd_type == "sendmsg":
-                self.sendCommandReply()
-                cmd_name = cmd.params.get('execute-app-name')
-                if cmd_name == "speak":
-                    self.queue.put(cmd)
-                elif cmd_name == "playback":
-                    self.queue.put(cmd)
-
-    def connectionLost(self, reason):
-        self.connected = False
-        self.disconnect_d.callback(None)
-
-
-class EslTransport(StringTransport):
-
-    def __init__(self):
-        StringTransport.__init__(self)
-        self.cmds = DeferredQueue()
-        self.esl_parser = EslParser()
-
-    def write(self, data):
-        StringTransport.write(self, data)
-        for cmd in self.esl_parser.parse(data):
-            self.cmds.put(cmd)
+from vxfreeswitch.tests.helpers import (
+    EslCommand, EslHelper, EslTransport, FixtureReply)
 
 
 class TestFreeSwitchESLProtocol(VumiTestCase):
 
     transport_class = VoiceServerTransport
-    transport_type = 'voice'
 
     VOICE_CMD = """
         python -c open("{filename}","w").write("{text}")
@@ -175,15 +30,19 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
-        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
-        self.recording_factory = RecordingServerFactory()
-        self.server = yield self.recording_server.listen(
-            self.recording_factory)
+        self.esl_helper = self.add_helper(EslHelper())
         self.tx_helper = self.add_helper(
             TransportHelper(self.transport_class))
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
-            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
+            'freeswitch_endpoint': 'tcp:127.0.0.1:1337',
+            'originate_parameters': {
+                'call_url': '/sofia/gateway/yogisip',
+                'exten': '100',
+                'cid_name': 'elcid',
+                'cid_num': '+1234'
+            },
+        })
         self.tr = EslTransport()
 
         self.proto = FreeSwitchESLProtocol(self.worker)
@@ -191,11 +50,6 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
         self.voice_cache_folder = self.mktemp()
         os.mkdir(self.voice_cache_folder)
-        self.add_cleanup(self.disconnect_server)
-
-    @inlineCallbacks
-    def disconnect_server(self):
-        yield self.server.loseConnection()
 
     def send_event(self, params):
         for key, value in params:
@@ -317,36 +171,19 @@ class TestVoiceServerTransport(VumiTestCase):
 
     @inlineCallbacks
     def setUp(self):
-        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
-        self.recording_factory = RecordingServerFactory()
-        self.server = yield self.recording_server.listen(
-            self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
+        self.esl_helper = self.add_helper(EslHelper())
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
-            'twisted_client_endpoint': 'tcp:127.0.0.1:1337'})
-        self.client = yield self.make_client()
-        self.add_cleanup(self.wait_for_client_deregistration)
-        yield self.wait_for_client_start()
-
-    @inlineCallbacks
-    def wait_for_client_deregistration(self):
-        if self.client.transport.connected:
-            self.client.sendDisconnectEvent()
-            self.client.transport.loseConnection()
-            yield self.client.disconnect_d
-            yield self.tx_helper.kick_delivery()
-        yield self.server.loseConnection()
-
-    def wait_for_client_start(self):
-        return self.client.connect_d
-
-    @inlineCallbacks
-    def make_client(self):
-        addr = self.worker.voice_server.getHost()
-        cc = protocol.ClientCreator(reactor, FakeFreeswitchProtocol)
-        client = yield cc.connectTCP("127.0.0.1", addr.port)
-        returnValue(client)
+            'freeswitch_endpoint': 'tcp:127.0.0.1:1337',
+            'originate_parameters': {
+                'call_url': '/sofia/gateway/yogisip',
+                'exten': '100',
+                'cid_name': 'elcid',
+                'cid_num': '+1234'
+            },
+        })
+        self.client = yield self.esl_helper.mk_client(self.worker)
 
     @inlineCallbacks
     def test_client_register(self):
@@ -460,142 +297,74 @@ class TestVoiceServerTransport(VumiTestCase):
         [nack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
-                         "Client u'TESTTEST' no longer connected")
-
-
-class RecordingServer(Protocol):
-    def __init__(self):
-        self.command_parser = EslParser()
-
-    def connectionMade(self):
-        self.factory.clients.append(self)
-
-    def _send_event(self, content):
-        self.transport.write(
-            'Content-Length: %s\n' % len(content) +
-            'Content-Type: text/event-plain\n\n' +
-            content)
-
-    def dataReceived(self, line):
-        commands = self.command_parser.parse(line)
-        self.factory.data.extend(commands)
-        for cmd in commands:
-            uuid = '%s' % self.factory.uuid()
-            # Send job received correctly
-            self.transport.write(
-                'Content-Type: command/reply\n'
-                'Reply-Text: +OK\n'
-                'Job-UUID: %s\n\n' % uuid)
-            if cmd.cmd_type.startswith('bgapi originate'):
-                # Send job complete success response
-                if self.factory.fail_connect:
-                    content_body = '+ERROR %s\n' % uuid
-                else:
-                    content_body = '+OK %s\n' % uuid
-                content = (
-                    'Content-Length: %d\n'
-                    'Event-Name: BACKGROUND_JOB\n'
-                    'Job-UUID: %s\n\n'
-                    '%s' %
-                    (len(content_body), uuid, content_body))
-                self._send_event(content)
-
-    def hangup(self):
-        content = (
-            'Event-Name: CHANNEL_HANGUP\n')
-        self._send_event(content)
-
-
-class RecordingServerFactory(protocol.Factory):
-    protocol = RecordingServer
-
-    def __init__(self):
-        self.data = []
-        self.clients = []
-        self.fail_connect = False
-        self.uuid = uuid4
+                         "Client u'test-uuid' no longer connected")
 
 
 class TestVoiceClientTransport(VumiTestCase):
 
     transport_class = VoiceServerTransport
-    transport_type = 'voice'
 
     @inlineCallbacks
     def setUp(self):
-        self.recording_server = endpoints.TCP4ServerEndpoint(reactor, 1337)
-        self.recording_factory = RecordingServerFactory()
-        self.server = yield self.recording_server.listen(
-            self.recording_factory)
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
+        self.esl_helper = self.add_helper(EslHelper())
         self.worker = yield self.tx_helper.get_transport({
             'twisted_endpoint': 'tcp:port=0',
-            'twisted_client_endpoint': 'tcp:127.0.0.1:port=1337',
+            'freeswitch_endpoint': 'tcp:127.0.0.1:port=1337',
+            'originate_parameters': {
+                'call_url': '/sofia/gateway/yogisip',
+                'exten': '100',
+                'cid_name': 'elcid',
+                'cid_num': '+1234'
+            },
         })
-        self.add_cleanup(self.disconnect_server)
-
-    @inlineCallbacks
-    def disconnect_server(self):
-        yield self.server.loseConnection()
-        for server in self.recording_factory.clients:
-            yield server.transport.loseConnection()
-            self.recording_factory.clients.remove(server)
-
-    def disconnect_client(self, client):
-        self.worker.deregister_client(client)
-        client.transport.loseConnection()
-
-    @inlineCallbacks
-    def hangup_client(self, client):
-        [rec_server] = self.recording_factory.clients
-        rec_server.hangup()
-        yield client.registration_d
 
     @inlineCallbacks
     def test_create_call(self):
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureReply("+OK uuid-1234"))
+
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
-        yield self.tx_helper.dispatch_outbound(msg)
-        [client] = self.worker._clients.values()
-        yield self.disconnect_client(client)
-        self.assertTrue('54321' in self.recording_factory.data[1].cmd_type)
-        self.assertTrue(
-            'foobar' in
-            self.recording_factory.data[-1].params['execute-app-arg'])
-        [ack] = yield self.tx_helper.get_dispatched_events()
+
+        with LogCatcher() as lc:
+            yield self.tx_helper.dispatch_outbound(msg)
+        self.assertEqual(lc.messages(), [])
+
+        events = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(events, [])
+
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        cmd = yield client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'speak', 'arg': 'foobar .',
+        }))
+
+        [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
     @inlineCallbacks
-    def test_channel_hangup(self):
-        msg = self.tx_helper.make_outbound(
-            'foobar', '12345', '54321', session_event='new')
-        yield self.tx_helper.dispatch_outbound(msg)
-        [client_addr] = self.worker._clients.keys()
-        client = self.worker._clients[client_addr]
-        self.assertTrue(client_addr in self.worker._clients)
-        yield self.hangup_client(client)
-        self.assertFalse(client_addr in self.worker._clients)
-        [hangup_msg] = yield (
-            self.tx_helper.wait_for_dispatched_inbound(1))
-        self.assertEqual(
-            hangup_msg['session_event'], TransportUserMessage.SESSION_CLOSE)
-        self.assertEqual(
-            hangup_msg['from_addr'], msg['to_addr'])
-
-    @inlineCallbacks
     def test_connect_error(self):
-        self.recording_factory.fail_connect = True
-        self.recording_factory.uuid = lambda: 'uuid-1234'
+        factory = yield self.esl_helper.mk_server(
+            fail_connect=True, uuid=lambda: 'uuid-1234')
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureReply("+ERROR Bad horse."))
+
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
         with LogCatcher(message='Error connecting') as lc:
             yield self.tx_helper.dispatch_outbound(msg)
+        self.assertEqual(lc.messages(), [
+            "Error connecting to client u'54321':"
+            " +ERROR Bad horse.",
+        ])
         [nack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Could not make call to client u'54321'")
-        self.assertEqual(lc.messages(), [
-            "Error connecting to client u'54321':"
-            " +ERROR uuid-1234",
-        ])
