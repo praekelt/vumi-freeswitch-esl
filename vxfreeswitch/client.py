@@ -78,7 +78,9 @@ class FreeSwitchClient(object):
             raise FreeSwitchClientError(msg)
         except Exception as err:
             raise FreeSwitchClientError(str(err))
-        reply = FreeSwitchClientReply(*result.get('Reply_Text', '').split())
+        data = result.get('data', {})
+        rawresponse = data.get('rawresponse', '')
+        reply = FreeSwitchClientReply(*rawresponse.split())
         returnValue(reply)
 
     def api(self, api_call):
