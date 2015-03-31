@@ -17,7 +17,7 @@ import os
 
 from twisted.internet.protocol import ServerFactory
 from twisted.internet.defer import (
-    inlineCallbacks, Deferred, gatherResults)
+    inlineCallbacks, returnValue, Deferred, gatherResults)
 from twisted.internet.utils import getProcessOutput
 
 from eventsocket import EventProtocol
@@ -380,8 +380,10 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
-        yield self.voice_client.api(
+        reply = yield self.voice_client.api(
             self.originate_formatter.format_call(self._to_addr, to_addr))
+        call_uuid = reply.args[1]
+        returnValue(call_uuid)
 
     @inlineCallbacks
     def handle_outbound_message(self, message):
@@ -394,7 +396,7 @@ class VoiceServerTransport(Transport):
             message.get('session_event') ==
                 TransportUserMessage.SESSION_NEW):
             try:
-                yield self.dial_outbound(client_addr)
+                call_uuid = yield self.dial_outbound(client_addr)
             except FreeSwitchClientError as e:
                 log.msg("Error connecting to client %r: %s" % (
                     client_addr, e))
@@ -402,7 +404,7 @@ class VoiceServerTransport(Transport):
                     message["message_id"],
                     "Could not make call to client %r" % (client_addr,))
             else:
-                self._originated_calls[client_addr] = message
+                self._originated_calls[call_uuid] = message
             return
 
         if client is None:
