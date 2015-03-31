@@ -5,13 +5,9 @@ FreeSwitch ESL API client.
 """
 
 from twisted.internet.protocol import ClientFactory
-from twisted.internet.defer import inlineCallbacks, Deferred
+from twisted.internet.defer import inlineCallbacks, returnValue, Deferred
 
-from eventsocket import EventProtocol
-
-
-class FreeswitchClientError(Exception):
-    """ Error raised while using the Freeswitch client. """
+from eventsocket import EventProtocol, EventError
 
 
 class FreeSwitchClientProtocol(EventProtocol):
@@ -24,23 +20,33 @@ class FreeSwitchClientProtocol(EventProtocol):
     def __init__(self, auth):
         EventProtocol.__init__(self)
         self._auth = auth
-        self.connected = Deferred()
+        self._connected = Deferred()
 
     @inlineCallbacks
     def connectionMade(self):
-        if self._auth_credentials:
-            yield self.auth(self._auth_credentials)
-        self.connected.callback(self)
+        if self._auth:
+            yield self.auth(self._auth)
+        self._connected.callback(self)
 
 
 class FreeSwitchClientFactory(ClientFactory):
     """ FreeSwitch ESL client factory. """
-    def __init__(self, auth):
-        ClientFactory.__init__(self)
+    def __init__(self, auth, noisy=False):
+        self.noisy = noisy
         self.auth = auth
 
     def protocol(self):
         return FreeSwitchClientProtocol(self.auth)
+
+
+class FreeSwitchClientError(Exception):
+    """ Raised when a FreeSwitch ESL command fails. """
+
+
+class FreeSwitchClientReply(object):
+    """ A successful reply to a FreeSwitch ESL command. """
+    def __init__(self, *args):
+        self.args = args
 
 
 class FreeSwitchClient(object):
@@ -59,13 +65,23 @@ class FreeSwitchClient(object):
         self.endpoint = endpoint
         self.factory = FreeSwitchClientFactory(auth)
 
-    def _connect(self):
-        """ Return a connected client or fail. """
-        d = self.endpoint.connect(self.factory)
-        d.addCallback(lambda client: client.connected)
-        return d
+    @inlineCallbacks
+    def with_connection(self, f):
+        """ Run a function with a connect client and then disconnect. """
+        try:
+            client = yield self.endpoint.connect(self.factory)
+            yield client._connected
+            result = yield f(client)
+            yield client.transport.loseConnection()
+        except EventError as err:
+            msg = err.args[0].get('Reply_Text') or str(err)
+            raise FreeSwitchClientError(msg)
+        except Exception as err:
+            raise FreeSwitchClientError(str(err))
+        reply = FreeSwitchClientReply(*result.get('Reply_Text', '').split())
+        returnValue(reply)
 
     def api(self, api_call):
-        d = self._connect()
-        d.addCallback(lambda client: client.api(api_call))
-        return d
+        def mk_call(client):
+            return client.api(api_call)
+        return self.with_connection(mk_call)
