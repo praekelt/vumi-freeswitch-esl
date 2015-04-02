@@ -5,7 +5,7 @@ FreeSwitch ESL API client.
 """
 
 from twisted.internet.protocol import ClientFactory
-from twisted.internet.defer import inlineCallbacks, returnValue, Deferred
+from twisted.internet.defer import inlineCallbacks, Deferred
 
 from eventsocket import EventProtocol, EventError
 
@@ -31,7 +31,7 @@ class FreeSwitchClientProtocol(EventProtocol):
 
 class FreeSwitchClientFactory(ClientFactory):
     """ FreeSwitch ESL client factory. """
-    def __init__(self, auth, noisy=False):
+    def __init__(self, auth=None, noisy=False):
         self.noisy = noisy
         self.auth = auth
 
@@ -48,6 +48,14 @@ class FreeSwitchClientReply(object):
     def __init__(self, *args):
         self.args = args
 
+    def __repr__(self):
+        return "<%s args=%r>" % (self.__class__.__name__, self.args)
+
+    def __eq__(self, other):
+        if isinstance(other, FreeSwitchClientReply):
+            return self.args == other.args
+        return NotImplemented
+
 
 class FreeSwitchClient(object):
     """ Helper class for making simple API calls to the FreeSwitch ESL
@@ -61,9 +69,9 @@ class FreeSwitchClient(object):
     :param str auth:
         Authentication string to send to FreeSwitch on connect.
     """
-    def __init__(self, endpoint, auth=None):
+    def __init__(self, endpoint, auth=None, noisy=False):
         self.endpoint = endpoint
-        self.factory = FreeSwitchClientFactory(auth)
+        self.factory = FreeSwitchClientFactory(auth=auth, noisy=noisy)
 
     def fallback_error_handler(self, failure):
         if failure.check(FreeSwitchClientError):
@@ -85,8 +93,9 @@ class FreeSwitchClient(object):
     def api_request_callback(self, ev):
         rawresponse = ev.get('data', {}).get('rawresponse', '')
         args = rawresponse.split()
-        if args and args[0] == "+ERROR":
-            raise FreeSwitchClientError(rawresponse)
+        if not (args and args[0] == "+OK"):
+            msg = rawresponse or str(ev)
+            raise FreeSwitchClientError(msg)
         return FreeSwitchClientReply(*args)
 
     def with_connection(self, f):
