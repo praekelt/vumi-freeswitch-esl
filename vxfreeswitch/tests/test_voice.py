@@ -162,7 +162,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             ])
 
 
-class TestVoiceServerTransport(VumiTestCase):
+class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
     transport_type = 'voice'
@@ -298,7 +298,7 @@ class TestVoiceServerTransport(VumiTestCase):
                          "Client u'test-uuid' no longer connected")
 
 
-class TestVoiceClientTransport(VumiTestCase):
+class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
 
