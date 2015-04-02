@@ -5,9 +5,7 @@
 import md5
 import os
 
-from twisted.internet.defer import inlineCallbacks, returnValue
-from twisted.internet.protocol import ClientFactory
-from twisted.internet import reactor
+from twisted.internet.defer import inlineCallbacks
 
 from vumi.message import TransportUserMessage
 from vumi.tests.helpers import VumiTestCase
@@ -17,7 +15,7 @@ from vumi.transports.tests.helpers import TransportHelper
 from vxfreeswitch import VoiceServerTransport
 from vxfreeswitch.voice import FreeSwitchESLProtocol
 from vxfreeswitch.tests.helpers import (
-    EslCommand, EslHelper, EslTransport, FixtureReply)
+    EslCommand, EslHelper, EslTransport, FixtureApiResponse)
 
 
 class TestFreeSwitchESLProtocol(VumiTestCase):
@@ -325,7 +323,7 @@ class TestVoiceClientTransport(VumiTestCase):
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
                        " 100 XML default elcid +1234 60"),
-            FixtureReply("+OK uuid-1234"))
+            FixtureApiResponse("+OK uuid-1234"))
 
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
@@ -354,7 +352,7 @@ class TestVoiceClientTransport(VumiTestCase):
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
                        " 100 XML default elcid +1234 60"),
-            FixtureReply("+ERROR Bad horse."))
+            FixtureApiResponse("+ERROR Bad horse."))
 
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
