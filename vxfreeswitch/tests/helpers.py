@@ -149,26 +149,41 @@ class RecordingServer(Protocol):
 class FixtureResponse(object):
     """ A response to an ESL command. """
 
+    API_RESPONSE = 'api/response'
     REPLY = 'command/reply'
     EVENT = 'text/event-plain'
 
-    def __init__(self, content, content_type):
-        self.content = content
+    def __init__(self, content_type, content=None, headers=()):
         self.content_type = content_type
+        self.content = content
+        self.headers = headers
 
     def to_bytes(self):
-        return (
-            "Content-Type: %s\n"
-            "%s\n\n"
-        ) % (self.content_type, self.content)
+        lines = []
+        lines.append("Content-Type: %s\n" % self.content_type)
+        if self.content is not None:
+            lines.append("Content-Length: %d\n" % len(self.content))
+        lines.extend("%s: %s\n" % (k, v) for k, v in self.headers)
+        lines.append("\n")
+        if self.content is not None:
+            lines.append(self.content)
+        return "".join(lines)
 
 
 class FixtureReply(FixtureResponse):
     """ A reply to an ESL command. """
 
     def __init__(self, *args):
-        content = "Reply-Text: %s" % " ".join(args)
-        super(FixtureReply, self).__init__(content, self.REPLY)
+        headers = [("Reply-Text", " ".join(args))]
+        super(FixtureReply, self).__init__(self.REPLY, headers=headers)
+
+
+class FixtureApiResponse(FixtureResponse):
+    """ A reply to an ESL command. """
+
+    def __init__(self, *args):
+        content = " ".join(args)
+        super(FixtureApiResponse, self).__init__(self.API_RESPONSE, content)
 
 
 class FixtureNotFound(Exception):
