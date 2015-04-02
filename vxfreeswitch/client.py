@@ -65,25 +65,46 @@ class FreeSwitchClient(object):
         self.endpoint = endpoint
         self.factory = FreeSwitchClientFactory(auth)
 
-    @inlineCallbacks
-    def with_connection(self, f):
-        """ Run a function with a connect client and then disconnect. """
-        try:
-            client = yield self.endpoint.connect(self.factory)
-            yield client._connected
-            result = yield f(client)
-            yield client.transport.loseConnection()
-        except EventError as err:
-            msg = err.args[0].get('Reply_Text') or str(err)
+    def fallback_error_handler(self, failure):
+        if failure.check(FreeSwitchClientError):
+            return failure
+        raise FreeSwitchClientError(str(failure.value))
+
+    def event_error_handler(self, failure):
+        if failure.check(EventError):
+            err = failure.value
+            ev = err.args[0]
+            msg = ev.get('Reply_Text') or str(err)
             raise FreeSwitchClientError(msg)
-        except Exception as err:
-            raise FreeSwitchClientError(str(err))
-        data = result.get('data', {})
-        rawresponse = data.get('rawresponse', '')
-        reply = FreeSwitchClientReply(*rawresponse.split())
-        returnValue(reply)
+        return failure
+
+    def request_callback(self, ev):
+        args = ev.get('Reply_Text', '').split()
+        return FreeSwitchClientReply(*args)
+
+    def api_request_callback(self, ev):
+        rawresponse = ev.get('data', {}).get('rawresponse', '')
+        args = rawresponse.split()
+        if args and args[0] == "+ERROR":
+            raise FreeSwitchClientError(rawresponse)
+        return FreeSwitchClientReply(*args)
+
+    def with_connection(self, f):
+        """ Run a function with a connect client and then disconnect.
+
+        :param function f:
+            f(client) - the function that makes calls to the client.
+        """
+        d = self.endpoint.connect(self.factory)
+        d.addCallback(lambda client: client._connected)
+        d.addCallback(f)
+        d.addErrback(self.event_error_handler)
+        d.addErrback(self.fallback_error_handler)
+        return d
 
     def api(self, api_call):
         def mk_call(client):
-            return client.api(api_call)
+            d = client.api(api_call)
+            d.addCallbacks(self.api_request_callback)
+            return d
         return self.with_connection(mk_call)
