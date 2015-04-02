@@ -1,6 +1,9 @@
 """ Tests for vxfreeswitch.client. """
 
-from twisted.internet.defer import inlineCallbacks, Deferred
+from zope.interface import implementer
+
+from twisted.internet.interfaces import IStreamClientEndpoint
+from twisted.internet.defer import inlineCallbacks, Deferred, fail, succeed
 from twisted.internet.protocol import ClientFactory
 from twisted.test.proto_helpers import StringTransportWithDisconnection
 from twisted.python.failure import Failure
@@ -12,15 +15,32 @@ from vxfreeswitch.client import (
     FreeSwitchClientProtocol, FreeSwitchClientFactory,
     FreeSwitchClient, FreeSwitchClientReply, FreeSwitchClientError)
 
+from vxfreeswitch.tests.helpers import FixtureApiResponse, FixtureReply
 
-def connect_transport(protocol):
+
+def connect_transport(protocol, factory=None):
     """ Connect a StringTransport to a client protocol. """
-    factory = ClientFactory()
+    if factory is None:
+        factory = ClientFactory()
     transport = StringTransportWithDisconnection()
     protocol.makeConnection(transport)
     transport.protocol = protocol
     protocol.factory = factory
     return transport
+
+
+@implementer(IStreamClientEndpoint)
+class StringClientEndpoint(object):
+    """ Client endpoint that connects to a StringTransport. """
+    transport = None
+
+    def connect(self, factory):
+        try:
+            protocol = factory.buildProtocol("dummy-address")
+            self.transport = connect_transport(protocol, factory)
+        except:
+            return fail()
+        return succeed(protocol)
 
 
 class TestFreeSwitchClientProtocol(TestCase):
@@ -111,9 +131,8 @@ class TestFreeSwitchClientReply(TestCase):
 
 
 class TestFreeSwitchClient(TestCase):
-    def mk_client(self, auth=None):
-        endpoint = "XXX"
-        return FreeSwitchClient(endpoint, auth)
+    def mk_client(self, endpoint=None, auth=None):
+        return FreeSwitchClient(endpoint=endpoint, auth=auth)
 
     def test_fallback_error_handler_client_error(self):
         client = self.mk_client()
@@ -204,25 +223,75 @@ class TestFreeSwitchClient(TestCase):
 
     @inlineCallbacks
     def test_with_connection(self):
-        def f(conn):
-            return conn.do_something()
+        endpoint = StringClientEndpoint()
+        client = self.mk_client(endpoint=endpoint)
+        f_called = Deferred()
 
-        client = self.mk_client()
-        result = yield client.with_connection(f)
-        self.assertEqual(result, "XXX")
+        def f(conn):
+            wait = Deferred()
+            f_called.callback((wait, conn))
+            return wait
+
+        d = client.with_connection(f)
+        self.assertEqual(endpoint.transport.connected, True)
+        self.assertEqual(endpoint.transport.value(), "")
+        self.assertTrue(isinstance(d.result, Deferred))
+
+        f_wait, f_conn = yield f_called
+        self.assertTrue(isinstance(f_conn, FreeSwitchClientProtocol))
+        self.assertTrue(isinstance(d.result, Deferred))
+        self.assertEqual(f_wait.called, False)
+
+        f_wait.callback({'foo': 'bar'})
+        reply = yield d
+
+        self.assertEqual(reply, {'foo': 'bar'})
+        self.assertEqual(endpoint.transport.value(), "")
+        self.assertEqual(endpoint.transport.connected, False)
 
     @inlineCallbacks
     def test_api(self):
-        client = self.mk_client()
-        result = yield client.api("foo")
-        self.assertEqual(result, "XXX")
+        endpoint = StringClientEndpoint()
+        client = self.mk_client(endpoint=endpoint)
+
+        d = client.api("foo")
+        self.assertEqual(endpoint.transport.value(), "api foo\n\n")
+        self.assertEqual(endpoint.transport.connected, True)
+        endpoint.transport.protocol.dataReceived(
+            FixtureApiResponse("+OK moo").to_bytes())
+        result = yield d
+
+        self.assertEqual(result, FreeSwitchClientReply("+OK", "moo"))
+        self.assertEqual(endpoint.transport.value(), "api foo\n\n")
+        self.assertEqual(endpoint.transport.connected, False)
 
     @inlineCallbacks
     def test_auth(self):
-        def f(conn):
-            return
+        endpoint = StringClientEndpoint()
+        client = self.mk_client(endpoint=endpoint, auth="kenny")
+        f_called = Deferred()
 
-        client = self.mk_client(auth="kenny")
-        result = yield client.with_connection(f)
-        self.assertEqual(result, "XXX")
-        self.assertTrue(authenticated)
+        def f(conn):
+            wait = Deferred()
+            f_called.callback((wait, conn))
+            return wait
+
+        d = client.with_connection(f)
+        self.assertEqual(endpoint.transport.value(), "auth kenny\n\n")
+        self.assertEqual(endpoint.transport.connected, True)
+        self.assertEqual(f_called.called, False)
+        self.assertTrue(isinstance(d.result, Deferred))
+
+        endpoint.transport.protocol.dataReceived(
+            FixtureReply("+OK").to_bytes())
+
+        f_wait, f_conn = yield f_called
+        self.assertTrue(isinstance(f_conn, FreeSwitchClientProtocol))
+        self.assertEqual(f_wait.called, False)
+
+        f_wait.callback({"foo": "bar"})
+        reply = yield d
+
+        self.assertEqual(reply, {"foo": "bar"})
+        self.assertEqual(endpoint.transport.value(), "auth kenny\n\n")
+        self.assertEqual(endpoint.transport.connected, False)

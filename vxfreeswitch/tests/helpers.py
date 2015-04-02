@@ -149,6 +149,7 @@ class RecordingServer(Protocol):
 class FixtureResponse(object):
     """ A response to an ESL command. """
 
+    AUTH_REQUEST = 'auth/request'
     API_RESPONSE = 'api/response'
     REPLY = 'command/reply'
     EVENT = 'text/event-plain'
@@ -176,6 +177,15 @@ class FixtureReply(FixtureResponse):
     def __init__(self, *args):
         headers = [("Reply-Text", " ".join(args))]
         super(FixtureReply, self).__init__(self.REPLY, headers=headers)
+
+
+class FixtureAuthResponse(FixtureResponse):
+    """ A response to an auth request. """
+
+    def __init__(self, *args):
+        headers = [("Reply-Text", " ".join(args))]
+        super(FixtureAuthResponse, self).__init__(
+            self.AUTH_REQUEST, headers=headers)
 
 
 class FixtureApiResponse(FixtureResponse):

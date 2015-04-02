@@ -5,7 +5,7 @@ FreeSwitch ESL API client.
 """
 
 from twisted.internet.protocol import ClientFactory
-from twisted.internet.defer import inlineCallbacks, Deferred
+from twisted.internet.defer import inlineCallbacks, returnValue, Deferred
 
 from eventsocket import EventProtocol, EventError
 
@@ -98,6 +98,15 @@ class FreeSwitchClient(object):
             raise FreeSwitchClientError(msg)
         return FreeSwitchClientReply(*args)
 
+    @inlineCallbacks
+    def _raw_with_connection(self, client, f):
+        yield client._connected
+        try:
+            result = yield f(client)
+        finally:
+            yield client.transport.loseConnection()
+        returnValue(result)
+
     def with_connection(self, f):
         """ Run a function with a connect client and then disconnect.
 
@@ -106,7 +115,7 @@ class FreeSwitchClient(object):
         """
         d = self.endpoint.connect(self.factory)
         d.addCallback(lambda client: client._connected)
-        d.addCallback(f)
+        d.addCallback(self._raw_with_connection, f)
         d.addErrback(self.event_error_handler)
         d.addErrback(self.fallback_error_handler)
         return d
