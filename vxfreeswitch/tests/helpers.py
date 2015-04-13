@@ -115,30 +115,9 @@ class RecordingServer(Protocol):
 
     def dataReceived(self, line):
         commands = self.command_parser.parse(line)
-        #self.factory.data.extend(commands)
         for cmd in commands:
             response = self.factory.get_response(cmd)
             self.transport.write(response.to_bytes())
-            continue
-            uuid = '%s' % self.factory.uuid()
-            # Send job received correctly
-            self.transport.write(
-                'Content-Type: command/reply\n'
-                'Reply-Text: +OK\n'
-                'Job-UUID: %s\n\n' % uuid)
-            if cmd.cmd_type.startswith('bgapi originate'):
-                # Send job complete success response
-                if self.factory.fail_connect:
-                    content_body = '+ERROR %s\n' % uuid
-                else:
-                    content_body = '+OK %s\n' % uuid
-                content = (
-                    'Content-Length: %d\n'
-                    'Event-Name: BACKGROUND_JOB\n'
-                    'Job-UUID: %s\n\n'
-                    '%s' %
-                    (len(content_body), uuid, content_body))
-                self._send_event(content)
 
     def hangup(self):
         content = (
