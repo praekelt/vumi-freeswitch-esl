@@ -257,7 +257,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(msg['content'], '572')
 
     @inlineCallbacks
-    def test_speech_url(self):
+    def test_speech_url_string(self):
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
@@ -272,6 +272,36 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(cmd, EslCommand.from_dict({
             'type': 'sendmsg', 'name': 'playback',
             'arg': 'http://example.com/speech_url_test.ogg',
+        }))
+
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_speech_url_list(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        msg = yield self.tx_helper.make_dispatch_reply(
+            reg, 'speech url test', helper_metadata={
+                'voice': {
+                    'speech_url': [
+                        'http://example.com/speech_url_test1.ogg',
+                        'http://example.com/speech_url_test2.ogg'
+                    ]
+                }
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': 'http://example.com/speech_url_test1.ogg',
+        }))
+        cmd = yield self.client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': 'http://example.com/speech_url_test2.ogg',
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
