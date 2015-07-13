@@ -140,7 +140,8 @@ class FreeSwitchESLProtocol(EventProtocol):
             hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
             duration = hangup_time - answered_time
         except (TypeError, ValueError):
-            log.warning("Unable to get call duration")
+            log.warning(
+                "Unable to get call duration for %r" % self.get_address())
             duration = None
         self.vumi_transport.deregister_client(self, duration)
 
