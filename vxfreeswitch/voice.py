@@ -374,7 +374,13 @@ class VoiceServerTransport(Transport):
             yield client.output_stream(overrideURL)
         elif isinstance(overrideURL, list):
             for url in overrideURL:
-                yield client.output_stream(url)
+                if isinstance(url, basestring):
+                    yield client.output_stream(url)
+                else:
+                    log.warning("Invalid URL %r" % url)
+        else:
+            log.warning("Invalid URL %r" % overrideURL)
+
 
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
