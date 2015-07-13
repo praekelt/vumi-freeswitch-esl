@@ -350,6 +350,12 @@ class VoiceServerTransport(Transport):
             client, text, TransportUserMessage.SESSION_RESUME)
 
     def send_inbound_message(self, client, text, session_event, duration=None):
+        helper_metadata = {}
+        if duration:
+            if not helper_metadata.get('voice'):
+                helper_metadata['voice'] = voice = {}
+            voice['call_duration'] = duration
+
         self.publish_message(
             from_addr=client.get_address(),
             to_addr=self._to_addr,
@@ -357,9 +363,7 @@ class VoiceServerTransport(Transport):
             content=text,
             transport_name=self.transport_name,
             transport_type=self._transport_type,
-            helper_metadata={
-                'call_duration': duration
-            },
+            helper_metadata=helper_metadata,
         )
 
     @inlineCallbacks
