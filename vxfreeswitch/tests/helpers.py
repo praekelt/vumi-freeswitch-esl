@@ -228,9 +228,6 @@ class FakeFreeSwitchProtocol(LineReceiver):
         self.sendLine('Content-Type: command/reply\nReply-Text: +OK\n%s\n\n' %
                       params)
 
-    def sendChannelHangupEvent(self):
-        self.sendPlainEvent('Channel_Hangup')
-
     def sendChannelHangupCompleteEvent(self, duration):
         """
         Sends a hangup complete event. Duration = duration of call in ms
