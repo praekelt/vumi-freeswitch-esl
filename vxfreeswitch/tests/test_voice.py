@@ -214,7 +214,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(msg['content'], None)
         self.assertEqual(msg['session_event'],
                          TransportUserMessage.SESSION_CLOSE)
-        self.assertEqual(msg['helper_metadata']['call_duration'], duration)
+        self.assertEqual(
+            msg['helper_metadata']['voice']['call_duration'], duration)
 
     @inlineCallbacks
     def test_client_hangup_invalid_freeswitch_duration(self):
@@ -229,7 +230,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(msg['content'], None)
         self.assertEqual(msg['session_event'],
                          TransportUserMessage.SESSION_CLOSE)
-        self.assertEqual(msg['helper_metadata']['call_duration'], None)
+        self.assertEqual(msg['helper_metadata'].get('voice'), None)
 
     @inlineCallbacks
     def test_simplemessage(self):
