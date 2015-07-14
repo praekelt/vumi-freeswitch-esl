@@ -4,6 +4,8 @@ from uuid import uuid4
 
 from zope.interface import implements
 
+import time
+
 from twisted.internet import reactor
 from twisted.internet.defer import (
     inlineCallbacks, returnValue, DeferredQueue, Deferred)
@@ -226,8 +228,16 @@ class FakeFreeSwitchProtocol(LineReceiver):
         self.sendLine('Content-Type: command/reply\nReply-Text: +OK\n%s\n\n' %
                       params)
 
-    def sendChannelHangupEvent(self):
-        self.sendPlainEvent('Channel_Hangup')
+    def sendChannelHangupCompleteEvent(self, duration):
+        """
+        Sends a hangup complete event. Duration = duration of call in ms
+        """
+        hangup_time = int(time.time() * 1000)
+        answer_time = int(hangup_time - duration)
+        self.sendPlainEvent('Channel_Hangup_Complete', {
+            'Caller-Channel-Answered-Time': answer_time,
+            'Caller-Channel-Hangup-Time': hangup_time
+        })
 
     def sendDtmfEvent(self, digit):
         self.sendPlainEvent('DTMF', {

@@ -133,9 +133,17 @@ class FreeSwitchESLProtocol(EventProtocol):
         if self.request_hang_up:
             return self.hangup()
 
-    def onChannelHangup(self, ev):
+    def onChannelHangupComplete(self, ev):
         log.msg("Channel HangUp")
-        self.vumi_transport.deregister_client(self)
+        try:
+            answered_time = int(ev.get('Caller_Channel_Answered_Time'))
+            hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
+            duration = hangup_time - answered_time
+        except (TypeError, ValueError):
+            log.warning(
+                "Unable to get call duration for %r" % self.get_address())
+            duration = None
+        self.vumi_transport.deregister_client(self, duration)
 
     def onDisconnect(self, ev):
         log.msg("Channel disconnect received")
@@ -326,14 +334,14 @@ class VoiceServerTransport(Transport):
                 client, None, TransportUserMessage.SESSION_NEW)
         log.info("Registration complete.")
 
-    def deregister_client(self, client):
+    def deregister_client(self, client, duration=None):
         client_addr = client.get_address()
         if client_addr not in self._clients:
             return
         log.info("Deregistering client connected from %r" % (client_addr,))
         del self._clients[client_addr]
         self.send_inbound_message(
-            client, None, TransportUserMessage.SESSION_CLOSE)
+            client, None, TransportUserMessage.SESSION_CLOSE, duration)
         client.registration_d.callback(None)
         log.info("Deregistration complete.")
 
@@ -341,7 +349,13 @@ class VoiceServerTransport(Transport):
         self.send_inbound_message(
             client, text, TransportUserMessage.SESSION_RESUME)
 
-    def send_inbound_message(self, client, text, session_event):
+    def send_inbound_message(self, client, text, session_event, duration=None):
+        helper_metadata = {}
+        if duration:
+            if not helper_metadata.get('voice'):
+                helper_metadata['voice'] = voice = {}
+            voice['call_duration'] = duration
+
         self.publish_message(
             from_addr=client.get_address(),
             to_addr=self._to_addr,
@@ -349,6 +363,7 @@ class VoiceServerTransport(Transport):
             content=text,
             transport_name=self.transport_name,
             transport_type=self._transport_type,
+            helper_metadata=helper_metadata,
         )
 
     @inlineCallbacks

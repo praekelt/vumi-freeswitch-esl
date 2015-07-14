@@ -204,15 +204,33 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_client_hangup_and_disconnect(self):
+        duration = 20
         yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
-        self.client.sendChannelHangupEvent()
+        self.client.sendChannelHangupCompleteEvent(duration)
         self.client.sendDisconnectEvent()
         self.client.transport.loseConnection()
         [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.assertEqual(msg['content'], None)
         self.assertEqual(msg['session_event'],
                          TransportUserMessage.SESSION_CLOSE)
+        self.assertEqual(
+            msg['helper_metadata']['voice']['call_duration'], duration)
+
+    @inlineCallbacks
+    def test_client_hangup_invalid_freeswitch_duration(self):
+        yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+        self.client.sendPlainEvent('Channel_Hangup_Complete', {
+            'Caller-Channel-Answered-Time': 'foo',
+            'Caller-Channel-Hangup-Time': 'bar'
+        })
+        self.client.transport.loseConnection()
+        [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(msg['content'], None)
+        self.assertEqual(msg['session_event'],
+                         TransportUserMessage.SESSION_CLOSE)
+        self.assertEqual(msg['helper_metadata'].get('voice'), None)
 
     @inlineCallbacks
     def test_simplemessage(self):
