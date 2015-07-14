@@ -2,6 +2,7 @@
 
 """Tests for vxfreeswitch.voice."""
 
+import logging
 import md5
 import os
 
@@ -275,7 +276,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(msg['content'], '572')
 
     @inlineCallbacks
-    def test_speech_url(self):
+    def test_speech_url_string(self):
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
@@ -295,6 +296,87 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         [ack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(ack['user_message_id'], msg['message_id'])
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_speech_url_list(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        msg = yield self.tx_helper.make_dispatch_reply(
+            reg, 'speech url test', helper_metadata={
+                'voice': {
+                    'speech_url': [
+                        'http://example.com/speech_url_test1.ogg',
+                        'http://example.com/speech_url_test2.ogg'
+                    ]
+                }
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': 'http://example.com/speech_url_test1.ogg',
+        }))
+        cmd = yield self.client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': 'http://example.com/speech_url_test2.ogg',
+        }))
+
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+
+    @inlineCallbacks
+    def test_speech_url_invalid_url(self):
+        url = 7
+        with LogCatcher(log_level=logging.WARN) as lc:
+            [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+            self.tx_helper.clear_dispatched_inbound()
+
+            msg = yield self.tx_helper.make_dispatch_reply(
+                reg, 'speech url test', helper_metadata={
+                    'voice': {
+                        'speech_url': url
+                    }
+                })
+        [warn_log] = lc.messages()
+        self.assertEqual(warn_log, "Invalid URL %r" % url)
+
+    @inlineCallbacks
+    def test_speech_invalid_url_list(self):
+        valid_url = 'http://example.com/speech_url_test1.ogg'
+        invalid_url1 = 7
+        invalid_url2 = 8
+        with LogCatcher(log_level=logging.WARN) as lc:
+            [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+            self.tx_helper.clear_dispatched_inbound()
+
+            msg = yield self.tx_helper.make_dispatch_reply(
+                reg, 'speech url test', helper_metadata={
+                    'voice': {
+                        'speech_url': [
+                            invalid_url1,
+                            valid_url,
+                            invalid_url2,
+                        ]
+                    }
+                })
+
+        cmd = yield self.client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': valid_url,
+        }))
+
+        [ack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+        [log1, log2] = lc.messages()
+        self.assertEqual(log1, 'Invalid URL %r' % invalid_url1)
+        self.assertEqual(log2, 'Invalid URL %r' % invalid_url2)
 
     @inlineCallbacks
     def test_reply_to_client_that_has_hung_up(self):
