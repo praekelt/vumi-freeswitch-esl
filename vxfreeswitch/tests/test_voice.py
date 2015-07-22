@@ -428,7 +428,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
 
-        with LogCatcher() as lc:
+        with LogCatcher(log_level=logging.WARN) as lc:
             yield self.tx_helper.dispatch_outbound(msg)
         self.assertEqual(lc.messages(), [])
 
