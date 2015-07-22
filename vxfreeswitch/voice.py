@@ -404,7 +404,7 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
-        command = self.originate_formatter.format_call(self._to_addr, to_addr))
+        command = self.originate_formatter.format_call(self._to_addr, to_addr)
         log.info("Dialing outbound via Freeswitch ESL: %r" % command)
         reply = yield self.voice_client.api(command)
         call_uuid = reply.args[1]
