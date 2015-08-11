@@ -247,6 +247,11 @@ class FakeFreeSwitchProtocol(LineReceiver):
     def sendDisconnectEvent(self):
         self.sendLine('Content-Type: text/disconnect-notice\n\n')
 
+    def sendChannelAnswerEvent(self):
+        self.sendPlainEvent('Channel_Answer', {
+            'Variable-Caller-ID': self.call_uuid
+        })
+
     def rawDataReceived(self, data):
         for cmd in self.esl_parser.parse(data):
             if cmd.cmd_type == "connect":
