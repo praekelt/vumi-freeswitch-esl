@@ -149,6 +149,10 @@ class FreeSwitchESLProtocol(EventProtocol):
         log.msg("Channel disconnect received")
         self.vumi_transport.deregister_client(self)
 
+    def onChannelAnswer(self, ev):
+        log.msg("Channel answered")
+        self.vumi_transport.client_answered(self)
+
     def unboundEvent(self, evdata, evname):
         log.msg("Unbound event %r" % (evname,))
 
