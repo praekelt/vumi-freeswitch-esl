@@ -327,7 +327,6 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(ack['user_message_id'], msg['message_id'])
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
-
     @inlineCallbacks
     def test_speech_url_invalid_url(self):
         url = 7
@@ -335,7 +334,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
             self.tx_helper.clear_dispatched_inbound()
 
-            msg = yield self.tx_helper.make_dispatch_reply(
+            yield self.tx_helper.make_dispatch_reply(
                 reg, 'speech url test', helper_metadata={
                     'voice': {
                         'speech_url': url
@@ -428,6 +427,8 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
 
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+
         with LogCatcher(log_level=logging.WARN) as lc:
             yield self.tx_helper.dispatch_outbound(msg)
         self.assertEqual(lc.messages(), [])
@@ -435,7 +436,8 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         events = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(events, [])
 
-        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        client.sendChannelAnswerEvent()
+
         cmd = yield client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
             'type': 'sendmsg', 'name': 'speak', 'arg': 'foobar .',
