@@ -149,6 +149,10 @@ class FreeSwitchESLProtocol(EventProtocol):
         log.msg("Channel disconnect received")
         self.vumi_transport.deregister_client(self)
 
+    def onChannelAnswer(self, ev):
+        log.msg("Channel answered")
+        self.vumi_transport.client_answered(self)
+
     def unboundEvent(self, evdata, evname):
         log.msg("Unbound event %r" % (evname,))
 
@@ -290,6 +294,7 @@ class VoiceServerTransport(Transport):
     def setup_transport(self):
         self._clients = {}
         self._originated_calls = {}
+        self._unanswered_channels = {}
 
         self.config = self.get_static_config()
         self._to_addr = self.config.to_addr
@@ -336,10 +341,17 @@ class VoiceServerTransport(Transport):
 
     def deregister_client(self, client, duration=None):
         client_addr = client.get_address()
+
+        # If originated call has not yet been answered
+        if self._unanswered_channels.get(client_addr):
+            d = self._unanswered_channels[client_addr]
+            d.errback(FreeSwitchClientError('Call is unanswered'))
+
         if client_addr not in self._clients:
             return
         log.info("Deregistering client connected from %r" % (client_addr,))
         del self._clients[client_addr]
+
         self.send_inbound_message(
             client, None, TransportUserMessage.SESSION_CLOSE, duration)
         client.registration_d.callback(None)
@@ -383,6 +395,15 @@ class VoiceServerTransport(Transport):
                 client.set_input_type(voicemeta.get('wait_for', None))
                 overrideURL = voicemeta.get('speech_url', None)
 
+        # Wait if call isn't answered
+        if self._unanswered_channels.get(client.get_address()):
+            try:
+                yield self._unanswered_channels.pop(client.get_address())
+            except FreeSwitchClientError:
+                yield self.publish_nack(
+                    message['message_id'], 'Unanswered Call')
+                returnValue(None)
+
         if overrideURL is None:
             yield client.output_message("%s\n" % content)
         elif isinstance(overrideURL, basestring):
@@ -396,11 +417,20 @@ class VoiceServerTransport(Transport):
         else:
             log.warning("Invalid URL %r" % overrideURL)
 
-
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
 
         yield self.publish_ack(message["message_id"], message["message_id"])
+
+    def client_answered(self, client):
+        """Function that is called when the ChannelAnswer event is received.
+        Fires the deferred related to the outbound call"""
+        d = self._unanswered_channels.pop(client.get_address(), None)
+        if d:
+            d.callback(None)
+        else:
+            log.warning(
+                'Cannot find unanswered channel for %r' % client.get_address())
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
@@ -408,6 +438,7 @@ class VoiceServerTransport(Transport):
         log.info("Dialing outbound via Freeswitch ESL: %r" % command)
         reply = yield self.voice_client.api(command)
         call_uuid = reply.args[1]
+        self._unanswered_channels[call_uuid] = Deferred()
         returnValue(call_uuid)
 
     @inlineCallbacks
