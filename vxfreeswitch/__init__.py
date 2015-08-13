@@ -2,6 +2,6 @@
 
 from .voice import VoiceServerTransport
 
-__version__ = "0.1.8a"
+__version__ = "0.1.8"
 
 __all__ = ['VoiceServerTransport']
