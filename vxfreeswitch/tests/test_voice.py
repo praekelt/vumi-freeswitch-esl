@@ -68,6 +68,32 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         self.assertEqual(cmd, expected_cmd)
         self.send_command_reply(response)
 
+    @inlineCallbacks
+    def assert_and_reply_tts(self, engine, voice, msg):
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "tts_engine=%s" % engine,
+        }, "+OK")
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "tts_voice=%s" % voice,
+        }, "+OK")
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "speak",
+            "arg": msg,
+        }, "+OK")
+
+    @inlineCallbacks
+    def assert_and_reply_playback(self, url):
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "playback_terminators=None",
+        }, "+OK")
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "playback",
+            "arg": url,
+        }, "+OK")
+
     def test_create_tts_command(self):
         self.assertEqual(
             self.proto.create_tts_command("foo", "myfile", "hi!"),
@@ -93,15 +119,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
                 "Using cached voice file %r" % (voice_filename,)
             ])
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "playback_terminators=None",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "playback",
-            "arg": voice_filename,
-        }, "+OK")
-
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
         with open(voice_filename) as f:
@@ -121,15 +139,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
                 "Generating voice file %r" % (voice_filename,)
             ])
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "playback_terminators=None",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "playback",
-            "arg": voice_filename,
-        }, "+OK")
-
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
         with open(voice_filename) as f:
@@ -139,27 +149,38 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
     def test_send_text_as_speech(self):
         d = self.proto.send_text_as_speech(
             "thomas", "his_masters_voice", "hi!")
+        yield self.assert_and_reply_tts("thomas", "his_masters_voice", "hi!")
+        yield d
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "tts_engine=thomas",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "tts_voice=his_masters_voice",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "speak",
-            "arg": "hi!",
-        }, "+OK")
+    @inlineCallbacks
+    def test_output_message(self):
+        self.proto.uniquecallid = "abc-1234"
+        with LogCatcher() as lc:
+            d = self.proto.output_message("Foo!")
+            self.assertEqual(lc.messages(), [
+                "[abc-1234] Sending text as speech: 'Foo!'",
+            ])
+        yield self.assert_and_reply_tts("flite", "kal", "Foo!")
+        yield d
 
+    @inlineCallbacks
+    def test_output_stream(self):
+        voice_filename = "http://example.com/foo.mp3"
+        self.proto.uniquecallid = "abc-1234"
+        with LogCatcher() as lc:
+            d = self.proto.output_stream(voice_filename)
+            self.assertEqual(lc.messages(), [
+                "[abc-1234] Playing back URL: 'http://example.com/foo.mp3'",
+            ])
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
     def test_unboundEvent(self):
+        self.proto.uniquecallid = "abc-1234"
         with LogCatcher() as lc:
             self.proto.unboundEvent({"some": "data"}, "custom_event")
             self.assertEqual(lc.messages(), [
-                "Unbound event 'custom_event'",
+                "[abc-1234] Unbound event 'custom_event'",
             ])
 
 
