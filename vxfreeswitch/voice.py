@@ -57,6 +57,9 @@ class FreeSwitchESLProtocol(EventProtocol):
         yield self.answer()
         yield self.vumi_transport.register_client(self)
 
+    def log(self, msg):
+        log.msg('[%s] %s' % (self.uniquecallid, msg))
+
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
 
@@ -100,7 +103,6 @@ class FreeSwitchESLProtocol(EventProtocol):
     @inlineCallbacks
     def stream_text_as_speech(self, message):
         finalmessage = message.replace("\n", " . ")
-        log.msg("TTS: " + finalmessage)
         cfg = self.vumi_transport.config
         if cfg.tts_type == "local":
             yield self.create_and_stream_text_as_speech(
@@ -117,9 +119,11 @@ class FreeSwitchESLProtocol(EventProtocol):
         return self.uniquecallid
 
     def output_message(self, text):
+        self.log("Sending text as speech: %r" % (text,))
         return self.stream_text_as_speech(text)
 
     def output_stream(self, url):
+        self.log("Playing back URL: %r" % (url,))
         return self.playback(url)
 
     def set_input_type(self, input_type):
@@ -129,12 +133,12 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.request_hang_up = True
 
     def onChannelExecuteComplete(self, ev):
-        log.msg("execute complete " + ev.variable_call_uuid)
+        self.log("execute complete " + ev.variable_call_uuid)
         if self.request_hang_up:
             return self.hangup()
 
     def onChannelHangupComplete(self, ev):
-        log.msg("Channel HangUp")
+        self.log("Channel HangUp")
         try:
             answered_time = int(ev.get('Caller_Channel_Answered_Time'))
             hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
@@ -146,15 +150,15 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self, duration)
 
     def onDisconnect(self, ev):
-        log.msg("Channel disconnect received")
+        self.log("Channel disconnect received")
         self.vumi_transport.deregister_client(self)
 
     def onChannelAnswer(self, ev):
-        log.msg("Channel answered")
+        self.log("Channel answered")
         self.vumi_transport.client_answered(self)
 
     def unboundEvent(self, evdata, evname):
-        log.msg("Unbound event %r" % (evname,))
+        self.log("Unbound event %r" % (evname,))
 
 
 class FreeSwitchESLFactory(ServerFactory):
