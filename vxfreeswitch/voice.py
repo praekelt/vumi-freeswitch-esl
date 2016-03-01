@@ -383,6 +383,12 @@ class VoiceServerTransport(Transport):
         )
 
     @inlineCallbacks
+    def log_and_nack(self, message, error):
+        self.log.warning(error)
+        yield self.publish_nack(
+            message["message_id"], reason=error)
+
+    @inlineCallbacks
     def send_outbound_message(self, client, message):
         content = message['content']
         if content is None:
@@ -413,13 +419,17 @@ class VoiceServerTransport(Transport):
         elif isinstance(overrideURL, basestring):
             yield client.output_stream(overrideURL)
         elif isinstance(overrideURL, list):
-            for url in overrideURL:
-                if isinstance(url, basestring):
-                    yield client.output_stream(url)
-                else:
-                    log.warning("Invalid URL %r" % url)
+            try:
+                urllist = 'file_string://%s' % '!'.join(overrideURL)
+                yield client.output_stream(urllist)
+            except TypeError:
+                error = "Invalid URL list %r" % overrideURL
+                yield self.log_and_nack(message, error)
+                return
         else:
-            log.warning("Invalid URL %r" % overrideURL)
+            error = "Invalid URL %r" % overrideURL
+            yield self.log_and_nack(message, error)
+            return
 
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
