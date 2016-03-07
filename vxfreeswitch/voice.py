@@ -153,10 +153,15 @@ class FreeSwitchESLProtocol(EventProtocol):
     def close_call(self):
         self.request_hang_up = True
 
+    @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
         self.log("execute complete " + ev.variable_call_uuid)
+        if ev.get('Application') == 'play_and_get_digits':
+            self.collecting_digits = False
+            yield self.vumi_transport.handle_input(
+                self, ev.get('variable_%s' % self.VAR_NAME))
         if self.request_hang_up:
-            return self.hangup()
+            yield self.hangup()
 
     def onChannelHangupComplete(self, ev):
         self.log("Channel HangUp")
