@@ -50,7 +50,6 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.current_input = ''
         self.input_type = None
         self.uniquecallid = None
-        self.collecting_digits = False
 
     @inlineCallbacks
     def connectionMade(self):
@@ -66,11 +65,6 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.uniquecallid = ctx.variable_call_uuid
 
     def onDtmf(self, ev):
-        if self.collecting_digits:
-            # If we are collecting digits using play_and_get_digits, then we
-            # want to wait until we have them all in ChannelExecuteComplete,
-            # rather than collecting them one by one here.
-            return
         if self.input_type is None:
             return self.vumi_transport.handle_input(self, ev.DTMF_Digit)
         else:
@@ -132,7 +126,6 @@ class FreeSwitchESLProtocol(EventProtocol):
     def output_stream(self, message, settings={}):
         self.log("Playing back: %r" % (message,))
         if settings.get('barge_in'):
-            self.collecting_digits = True
             terminator = settings.get('wait_for')
             if settings.get('wait_for') is None:
                 # We just want to get 1 digit
@@ -163,10 +156,6 @@ class FreeSwitchESLProtocol(EventProtocol):
     @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
         self.log("execute complete " + ev.variable_call_uuid)
-        if ev.get('Application') == 'play_and_get_digits':
-            self.collecting_digits = False
-            yield self.vumi_transport.handle_input(
-                self, ev.get('variable_%s' % self.VAR_NAME))
         if self.request_hang_up:
             yield self.hangup()
 

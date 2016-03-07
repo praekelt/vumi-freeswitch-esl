@@ -456,6 +456,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_barge_in_defaults(self):
+        '''Barge ins should use the play_and_get_digits command with certain
+        default values.'''
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
@@ -471,6 +473,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_barge_in_non_defaults(self):
+        '''When the correct fields are specified, these should override the
+        defaults.'''
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
@@ -490,7 +494,9 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             terminator='#', tries=2, timeout=5000)
 
     @inlineCallbacks
-    def test_barge_in_ignores_single_digits(self):
+    def test_barge_in_collecting_digits(self):
+        '''If we send a barge in message, we should collect the digits that
+        the client has sent us.'''
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
 
@@ -503,12 +509,11 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             })
 
         self.client.sendDtmfEvent('5')
+        self.client.sendDtmfEvent('6')
         self.client.sendDtmfEvent('#')
 
-        self.client.sendPlayAndGetDigitsComplete('6#')
-
         [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
-        self.assertEqual(msg['content'], '6#')
+        self.assertEqual(msg['content'], '56')
 
 
 class TestVoiceServerTransportOutboundCalls(VumiTestCase):

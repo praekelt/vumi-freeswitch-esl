@@ -2,8 +2,6 @@
 
 from uuid import uuid4
 
-from vxfreeswitch.voice import FreeSwitchESLProtocol
-
 from zope.interface import implements
 
 import time
@@ -221,7 +219,6 @@ class FakeFreeSwitchProtocol(LineReceiver):
     def sendPlainEvent(self, name, params=None):
         params = {} if params is None else params
         params['Event-Name'] = name
-        params['variable_call_uuid'] = self.call_uuid
         data = "\n".join("%s: %s" % (k, v) for k, v in params.items()) + "\n"
         self.sendLine(
             'Content-Length: %d\nContent-Type: text/event-plain\n\n%s' %
@@ -269,18 +266,12 @@ class FakeFreeSwitchProtocol(LineReceiver):
                     self.queue.put(cmd)
                 elif cmd_name == "playback":
                     self.queue.put(cmd)
-                elif cmd_name == 'play_and_get_digits':
+                elif cmd_name == "play_and_get_digits":
                     self.queue.put(cmd)
 
     def connectionLost(self, reason):
         self.connected = False
         self.disconnect_d.callback(None)
-
-    def sendPlayAndGetDigitsComplete(self, result):
-        self.sendPlainEvent('Channel_Execute_Complete', {
-            'Application': 'play_and_get_digits',
-            'variable_%s' % FreeSwitchESLProtocol.VAR_NAME: result,
-        })
 
 
 class EslHelper(object):
