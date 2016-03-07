@@ -91,6 +91,20 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             "arg": url,
         }, "+OK")
 
+    @inlineCallbacks
+    def assert_and_reply_get_digits(self, msg, **kwargs):
+        params = {
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "' '",
+            'tries': 1, 'msg': msg,
+        }
+        params.update(kwargs)
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "play_and_get_digits",
+            "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
+                    "%(terminator)s %(msg)s silence_stream://1 digits "
+                    "[\\d\\*#]*") % params,
+        }, "+OK")
+
     def test_create_tts_command(self):
         self.assertEqual(
             self.proto.create_tts_command("foo", "myfile", "hi!"),
@@ -182,6 +196,19 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
                 "[abc-1234] Unbound event 'custom_event'",
             ])
 
+    @inlineCallbacks
+    def test_output_stream_barge_in_defaults(self):
+        self.proto.output_stream('foo', {'barge_in': True})
+        yield self.assert_and_reply_get_digits('foo')
+
+    @inlineCallbacks
+    def test_output_stream_barge_in_non_defaults(self):
+        self.proto.output_stream('foo', {
+            'barge_in': True, 'wait_for': '#', 'tries': 2, 'time_gap': 5000})
+        yield self.assert_and_reply_get_digits(
+            'foo', minimum=0, maximum=128, tries=2, timeout=5000,
+            terminator='#')
+
 
 class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
@@ -203,6 +230,19 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             },
         })
         self.client = yield self.esl_helper.mk_client(self.worker)
+
+    def assert_get_digits_command(self, cmd, msg, **kwargs):
+        params = {
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "' '",
+            'tries': 1, 'msg': msg,
+        }
+        params.update(kwargs)
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'play_and_get_digits',
+            "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
+                    "%(terminator)s %(msg)s silence_stream://1 digits "
+                    "[\\d\\*#]*") % params,
+        }))
 
     @inlineCallbacks
     def test_client_register(self):
@@ -413,6 +453,62 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Client u'test-uuid' no longer connected")
+
+    @inlineCallbacks
+    def test_barge_in_defaults(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                },
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assert_get_digits_command(cmd, "say:'barge in test . '")
+
+    @inlineCallbacks
+    def test_barge_in_non_defaults(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                    'wait_for': '#',
+                    'tries': 2,
+                    'time_gap': 5000,
+                },
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assert_get_digits_command(
+            cmd, "say:'barge in test . '", minimum=0, maximum=128,
+            terminator='#', tries=2, timeout=5000)
+
+    @inlineCallbacks
+    def test_barge_in_ignores_single_digits(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                    'wait_for': '#',
+                },
+            })
+
+        self.client.sendDtmfEvent('5')
+        self.client.sendDtmfEvent('#')
+
+        self.client.sendPlayAndGetDigitsComplete('6#')
+
+        [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(msg['content'], '6#')
 
 
 class TestVoiceServerTransportOutboundCalls(VumiTestCase):
