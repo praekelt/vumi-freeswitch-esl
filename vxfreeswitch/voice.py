@@ -41,6 +41,7 @@ class VoiceError(VumiError):
 
 
 class FreeSwitchESLProtocol(EventProtocol):
+    VAR_NAME = 'digits'
 
     def __init__(self, vumi_transport):
         EventProtocol.__init__(self)
@@ -49,6 +50,7 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.current_input = ''
         self.input_type = None
         self.uniquecallid = None
+        self.collecting_digits = False
 
     @inlineCallbacks
     def connectionMade(self):
@@ -64,6 +66,11 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.uniquecallid = ctx.variable_call_uuid
 
     def onDtmf(self, ev):
+        if self.collecting_digits:
+            # If we are collecting digits using play_and_get_digits, then we
+            # want to wait until we have them all in ChannelExecuteComplete,
+            # rather than collecting them one by one here.
+            return
         if self.input_type is None:
             return self.vumi_transport.handle_input(self, ev.DTMF_Digit)
         else:
