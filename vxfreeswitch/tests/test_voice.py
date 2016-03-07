@@ -78,10 +78,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             "type": "sendmsg", "name": "set",
             "arg": "tts_voice=%s" % voice,
         }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "speak",
-            "arg": msg,
-        }, "+OK")
+        yield self.assert_and_reply_playback("say:'%s'" % msg)
 
     @inlineCallbacks
     def assert_and_reply_playback(self, url):
@@ -105,6 +102,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def test_create_and_stream_text_as_speech_file_found(self):
+        self.proto.uniquecallid = "abc-1234"
         content = "Hello!"
         voice_key = md5.md5(content).hexdigest()
         voice_filename = os.path.join(
@@ -116,7 +114,8 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             d = self.proto.create_and_stream_text_as_speech(
                 self.voice_cache_folder, self.VOICE_CMD, "wav", content)
             self.assertEqual(lc.messages(), [
-                "Using cached voice file %r" % (voice_filename,)
+                "Using cached voice file %r" % (voice_filename,),
+                "[abc-1234] Playing back: %r" % (voice_filename,),
             ])
 
         yield self.assert_and_reply_playback(voice_filename)
@@ -157,11 +156,11 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         self.proto.uniquecallid = "abc-1234"
         with LogCatcher() as lc:
             d = self.proto.output_message("Foo!")
+            yield self.assert_and_reply_tts("flite", "kal", "Foo!")
+            yield d
             self.assertEqual(lc.messages(), [
-                "[abc-1234] Sending text as speech: 'Foo!'",
+                "[abc-1234] Playing back: \"say:'Foo!'\"",
             ])
-        yield self.assert_and_reply_tts("flite", "kal", "Foo!")
-        yield d
 
     @inlineCallbacks
     def test_output_stream(self):
@@ -170,7 +169,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         with LogCatcher() as lc:
             d = self.proto.output_stream(voice_filename)
             self.assertEqual(lc.messages(), [
-                "[abc-1234] Playing back URL: 'http://example.com/foo.mp3'",
+                "[abc-1234] Playing back: 'http://example.com/foo.mp3'",
             ])
         yield self.assert_and_reply_playback(voice_filename)
         yield d
@@ -261,7 +260,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'voice test .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -286,7 +285,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'voice test .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
         }))
 
         self.client.sendDtmfEvent('5')
@@ -459,7 +458,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
         cmd = yield client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'foobar .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'foobar . '",
         }))
 
         [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
