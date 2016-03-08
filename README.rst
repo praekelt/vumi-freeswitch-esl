@@ -55,3 +55,20 @@ may contain the following keys:
    If ``barge_in`` is ``True`` and ``tries`` is greater than ``1``, this
    specifies the time gap (in ms) that is given before repeating the message,
    if no DTMF characters are received. Defaults to ``3000``.
+
+Example:
+
+::
+
+    "helper_metadata": {
+        "voice": {
+            "speech_url": [
+                "http://www.example.com/voice/ab34f611cdee.ogg",
+                "http://www.example.com/voice/cd43f622dcef.ogg"
+            ],
+            "wait_for": "#",
+            "barge_in": True,
+            "tries": 3,
+            "time_gap": 5000,
+        },
+    }
