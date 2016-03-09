@@ -115,6 +115,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def test_create_and_stream_text_as_speech_file_found(self):
+        self.proto.uniquecallid = "abc-1234"
         content = "Hello!"
         voice_key = md5.md5(content).hexdigest()
         voice_filename = os.path.join(
@@ -126,8 +127,8 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             d = self.proto.create_and_stream_text_as_speech(
                 self.voice_cache_folder, self.VOICE_CMD, "wav", content)
             self.assertEqual(lc.messages(), [
-                "Using cached voice file %r" % (voice_filename,),
-                "Playing back: %r" % (voice_filename,),
+                "[abc-1234] Using cached voice file %r" % (voice_filename,),
+                "[abc-1234] Playing back: %r" % (voice_filename,),
             ])
 
         yield self.assert_and_reply_playback(voice_filename)
@@ -138,6 +139,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def test_create_and_stream_text_as_speech_file_not_found(self):
+        self.proto.uniquecallid = "abc-1234"
         content = "Hello!"
         voice_key = md5.md5(content).hexdigest()
         voice_filename = os.path.join(
@@ -147,7 +149,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             d = self.proto.create_and_stream_text_as_speech(
                 self.voice_cache_folder, self.VOICE_CMD, "wav", content)
             self.assertEqual(lc.messages(), [
-                "Generating voice file %r" % (voice_filename,)
+                "[abc-1234] Generating voice file %r" % (voice_filename,)
             ])
 
         yield self.assert_and_reply_playback(voice_filename)
@@ -165,30 +167,33 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def test_output_message(self):
+        self.proto.uniquecallid = "abc-1234"
         with LogCatcher() as lc:
             d = self.proto.output_message("Foo!")
             yield self.assert_and_reply_tts("flite", "kal", "Foo!")
             yield d
             self.assertEqual(lc.messages(), [
-                "Playing back: \"say:'Foo!'\"",
+                "[abc-1234] Playing back: \"say:'Foo!'\"",
             ])
 
     @inlineCallbacks
     def test_output_stream(self):
+        self.proto.uniquecallid = "abc-1234"
         voice_filename = "http://example.com/foo.mp3"
         with LogCatcher() as lc:
             d = self.proto.output_stream(voice_filename)
             self.assertEqual(lc.messages(), [
-                "Playing back: 'http://example.com/foo.mp3'",
+                "[abc-1234] Playing back: 'http://example.com/foo.mp3'",
             ])
         yield self.assert_and_reply_playback(voice_filename)
         yield d
 
     def test_unboundEvent(self):
+        self.proto.uniquecallid = "abc-1234"
         with LogCatcher() as lc:
             self.proto.unboundEvent({"some": "data"}, "custom_event")
             self.assertEqual(lc.messages(), [
-                "Unbound event 'custom_event'",
+                "[abc-1234] Unbound event 'custom_event'",
             ])
 
     @inlineCallbacks

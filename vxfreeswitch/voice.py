@@ -12,6 +12,7 @@ sent as inbound messages. Digits may either be sent through individually
 (the default) or collected until a specified character is pressed.
 """
 
+import logging
 import md5
 import os
 
@@ -29,7 +30,6 @@ from vumi.transports import Transport
 from vumi.message import TransportUserMessage
 from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint
 from vumi.errors import VumiError
-from vumi import log
 
 from vxfreeswitch.originate import (
     OriginateFormatter, OriginateMissingParameter)
@@ -57,8 +57,9 @@ class FreeSwitchESLProtocol(EventProtocol):
         yield self.answer()
         yield self.vumi_transport.register_client(self)
 
-    def log(self, msg):
-        log.msg('[%s] %s' % (self.uniquecallid, msg))
+    def log(self, msg, level=logging.INFO):
+        self.vumi_transport.log.msg(
+            '[%s] %s' % (self.uniquecallid, msg), level=level)
 
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
@@ -87,11 +88,11 @@ class FreeSwitchESLProtocol(EventProtocol):
         key = md5.md5(message).hexdigest()
         filename = os.path.join(folder, "voice-%s.%s" % (key, ext))
         if not os.path.exists(filename):
-            log.msg("Generating voice file %r" % (filename,))
+            self.log("Generating voice file %r" % (filename,))
             cmd, args = self.create_tts_command(command, filename, message)
             yield getProcessOutput(cmd, args=args)
         else:
-            log.msg("Using cached voice file %r" % (filename,))
+            self.log("Using cached voice file %r" % (filename,))
 
         yield self.output_stream(filename, settings)
 
@@ -126,7 +127,7 @@ class FreeSwitchESLProtocol(EventProtocol):
         return self.stream_text_as_speech(text, settings=settings)
 
     def output_stream(self, message, settings={}):
-        self.vumi_transport.log.info("Playing back: %r" % (message,))
+        self.log("Playing back: %r" % (message,))
         if settings.get('barge_in'):
             terminator = settings.get('wait_for')
             if terminator is None:
@@ -158,36 +159,35 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
-        self.vumi_transport.log.info(
+        self.log(
             "execute complete: %s (%s)" % (
                 ev.Application, ev.variable_call_uuid))
         if self.request_hang_up:
             yield self.hangup()
 
     def onChannelHangupComplete(self, ev):
-        self.vumi_transport.log.info("Channel HangUp (%s)" % self.uniquecallid)
+        self.log("Channel HangUp (%s)" % self.uniquecallid)
         try:
             answered_time = int(ev.get('Caller_Channel_Answered_Time'))
             hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
             duration = hangup_time - answered_time
         except (TypeError, ValueError):
-            log.warning(
-                "Unable to get call duration for %r" % self.get_address())
+            self.log(
+                "Unable to get call duration for %r" % self.get_address(),
+                level=logging.WARNING)
             duration = None
         self.vumi_transport.deregister_client(self, duration)
 
     def onDisconnect(self, ev):
-        self.vumi_transport.log.info(
-            "Channel disconnect received (%s)" % self.uniquecallid)
+        self.log("Channel disconnect received")
         self.vumi_transport.deregister_client(self)
 
     def onChannelAnswer(self, ev):
-        self.vumi_transport.log.info(
-            "Channel answered (%s)" % self.uniquecallid)
+        self.log("Channel answered")
         self.vumi_transport.client_answered(self)
 
     def unboundEvent(self, evdata, evname):
-        self.vumi_transport.log.debug("Unbound event %r" % (evname,))
+        self.log("Unbound event %r" % (evname,), level=logging.DEBUG)
 
 
 class FreeSwitchESLFactory(ServerFactory):
@@ -351,7 +351,7 @@ class VoiceServerTransport(Transport):
             # We need to wait for all the client connections to be closed (and
             # their deregistration messages sent) before tearing down the rest
             # of the transport.
-            log.info("Shutting down %d clients." % len(self._clients))
+            self.log.info("Shutting down %d clients." % len(self._clients))
             self.voice_server.loseConnection()
             yield gatherResults([
                 client.registration_d for client in self._clients.values()])
@@ -362,7 +362,7 @@ class VoiceServerTransport(Transport):
         # fire it after we're finished with our own deregistration process.
         client.registration_d = Deferred()
         client_addr = client.get_address()
-        log.info("Registering client connected from %r" % (client_addr,))
+        self.log.info("Registering client connected from %r" % (client_addr,))
         self._clients[client_addr] = client
         originated_msg = self._originated_calls.pop(client_addr, None)
         if originated_msg is not None:
@@ -370,7 +370,7 @@ class VoiceServerTransport(Transport):
         else:
             self.send_inbound_message(
                 client, None, TransportUserMessage.SESSION_NEW)
-        log.info("Registration complete.")
+        self.log.info("Registration complete.")
 
     def deregister_client(self, client, duration=None):
         client_addr = client.get_address()
@@ -382,13 +382,13 @@ class VoiceServerTransport(Transport):
 
         if client_addr not in self._clients:
             return
-        log.info("Deregistering client connected from %r" % (client_addr,))
+        self.log.info("Deregistering client connected from %r" % (client_addr,))
         del self._clients[client_addr]
 
         self.send_inbound_message(
             client, None, TransportUserMessage.SESSION_CLOSE, duration)
         client.registration_d.callback(None)
-        log.info("Deregistration complete.")
+        self.log.info("Deregistration complete.")
 
     def handle_input(self, client, text):
         self.send_inbound_message(
@@ -467,13 +467,13 @@ class VoiceServerTransport(Transport):
         if d:
             d.callback(None)
         else:
-            log.warning(
+            self.log.warning(
                 'Cannot find unanswered channel for %r' % client.get_address())
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
         command = self.originate_formatter.format_call(self._to_addr, to_addr)
-        log.info("Dialing outbound via Freeswitch ESL: %r" % command)
+        self.log.info("Dialing outbound via Freeswitch ESL: %r" % command)
         reply = yield self.voice_client.api(command)
         call_uuid = reply.args[1]
         self._unanswered_channels[call_uuid] = Deferred()
@@ -492,7 +492,7 @@ class VoiceServerTransport(Transport):
             try:
                 call_uuid = yield self.dial_outbound(client_addr)
             except FreeSwitchClientError as e:
-                log.msg("Error connecting to client %r: %s" % (
+                self.log.warning("Error connecting to client %r: %s" % (
                     client_addr, e))
                 yield self.publish_nack(
                     message["message_id"],
