@@ -159,14 +159,12 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
-        self.log(
-            "execute complete: %s (%s)" % (
-                ev.Application, ev.variable_call_uuid))
+        self.log("execute complete: %s" % ev.Application)
         if self.request_hang_up:
             yield self.hangup()
 
     def onChannelHangupComplete(self, ev):
-        self.log("Channel HangUp (%s)" % self.uniquecallid)
+        self.log("Channel HangUp")
         try:
             answered_time = int(ev.get('Caller_Channel_Answered_Time'))
             hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
