@@ -128,10 +128,12 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.log("Playing back: %r" % (message,))
         if settings.get('barge_in'):
             terminator = settings.get('wait_for')
-            if settings.get('wait_for') is None:
+            if terminator is None:
                 # We just want to get 1 digit
                 minimum, maximum = 1, 1
-                terminator = "' '"
+                # We don't want a terminating character, but we have to supply
+                # one, so we supply a blank one
+                terminator = "''"
             else:
                 # 128 is the maximum amount of digits that freeswitch can
                 # collect
