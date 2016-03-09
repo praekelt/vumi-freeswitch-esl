@@ -68,6 +68,42 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
         self.assertEqual(cmd, expected_cmd)
         self.send_command_reply(response)
 
+    @inlineCallbacks
+    def assert_and_reply_tts(self, engine, voice, msg):
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "tts_engine=%s" % engine,
+        }, "+OK")
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "tts_voice=%s" % voice,
+        }, "+OK")
+        yield self.assert_and_reply_playback("say:'%s'" % msg)
+
+    @inlineCallbacks
+    def assert_and_reply_playback(self, url):
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "set",
+            "arg": "playback_terminators=None",
+        }, "+OK")
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "playback",
+            "arg": url,
+        }, "+OK")
+
+    @inlineCallbacks
+    def assert_and_reply_get_digits(self, msg, **kwargs):
+        params = {
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "''",
+            'tries': 1, 'msg': msg,
+        }
+        params.update(kwargs)
+        yield self.assert_and_reply({
+            "type": "sendmsg", "name": "play_and_get_digits",
+            "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
+                    "%(terminator)s %(msg)s silence_stream://1") % params,
+        }, "+OK")
+
     def test_create_tts_command(self):
         self.assertEqual(
             self.proto.create_tts_command("foo", "myfile", "hi!"),
@@ -79,6 +115,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
 
     @inlineCallbacks
     def test_create_and_stream_text_as_speech_file_found(self):
+        self.proto.uniquecallid = "abc-1234"
         content = "Hello!"
         voice_key = md5.md5(content).hexdigest()
         voice_filename = os.path.join(
@@ -90,18 +127,11 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             d = self.proto.create_and_stream_text_as_speech(
                 self.voice_cache_folder, self.VOICE_CMD, "wav", content)
             self.assertEqual(lc.messages(), [
-                "Using cached voice file %r" % (voice_filename,)
+                "Using cached voice file %r" % (voice_filename,),
+                "[abc-1234] Playing back: %r" % (voice_filename,),
             ])
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "playback_terminators=None",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "playback",
-            "arg": voice_filename,
-        }, "+OK")
-
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
         with open(voice_filename) as f:
@@ -121,15 +151,7 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
                 "Generating voice file %r" % (voice_filename,)
             ])
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "playback_terminators=None",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "playback",
-            "arg": voice_filename,
-        }, "+OK")
-
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
         with open(voice_filename) as f:
@@ -139,28 +161,63 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
     def test_send_text_as_speech(self):
         d = self.proto.send_text_as_speech(
             "thomas", "his_masters_voice", "hi!")
+        yield self.assert_and_reply_tts("thomas", "his_masters_voice", "hi!")
+        yield d
 
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "tts_engine=thomas",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "set",
-            "arg": "tts_voice=his_masters_voice",
-        }, "+OK")
-        yield self.assert_and_reply({
-            "type": "sendmsg", "name": "speak",
-            "arg": "hi!",
-        }, "+OK")
+    @inlineCallbacks
+    def test_output_message(self):
+        self.proto.uniquecallid = "abc-1234"
+        with LogCatcher() as lc:
+            d = self.proto.output_message("Foo!")
+            yield self.assert_and_reply_tts("flite", "kal", "Foo!")
+            yield d
+            self.assertEqual(lc.messages(), [
+                "[abc-1234] Playing back: \"say:'Foo!'\"",
+            ])
 
+    @inlineCallbacks
+    def test_output_stream(self):
+        voice_filename = "http://example.com/foo.mp3"
+        self.proto.uniquecallid = "abc-1234"
+        with LogCatcher() as lc:
+            d = self.proto.output_stream(voice_filename)
+            self.assertEqual(lc.messages(), [
+                "[abc-1234] Playing back: 'http://example.com/foo.mp3'",
+            ])
+        yield self.assert_and_reply_playback(voice_filename)
         yield d
 
     def test_unboundEvent(self):
+        self.proto.uniquecallid = "abc-1234"
         with LogCatcher() as lc:
             self.proto.unboundEvent({"some": "data"}, "custom_event")
             self.assertEqual(lc.messages(), [
-                "Unbound event 'custom_event'",
+                "[abc-1234] Unbound event 'custom_event'",
             ])
+
+    @inlineCallbacks
+    def test_output_stream_barge_in_defaults(self):
+        self.proto.output_stream('foo', {'barge_in': True})
+        yield self.assert_and_reply_get_digits('foo')
+
+    @inlineCallbacks
+    def test_output_stream_barge_in_non_defaults(self):
+        self.proto.output_stream('foo', {
+            'barge_in': True, 'wait_for': '#', 'tries': 2, 'time_gap': 5000})
+        yield self.assert_and_reply_get_digits(
+            'foo', minimum=0, maximum=128, tries=2, timeout=5000,
+            terminator='#')
+
+    @inlineCallbacks
+    def test_send_text_as_speech_quote_escaping(self):
+        '''If there are any single quotes in the text that we are converting
+        to speech, we should escape those quotes before sending it to
+        freeswitch, since we send the text string within single quotes.'''
+        d = self.proto.send_text_as_speech(
+            "thomas", "his_masters_voice", "text with single quote's")
+        yield self.assert_and_reply_tts(
+            "thomas", "his_masters_voice", "text with single quote\\'s")
+        yield d
 
 
 class TestVoiceServerTransportInboundCalls(VumiTestCase):
@@ -183,6 +240,18 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             },
         })
         self.client = yield self.esl_helper.mk_client(self.worker)
+
+    def assert_get_digits_command(self, cmd, msg, **kwargs):
+        params = {
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "''",
+            'tries': 1, 'msg': msg,
+        }
+        params.update(kwargs)
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'play_and_get_digits',
+            "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
+                    "%(terminator)s %(msg)s silence_stream://1") % params,
+        }))
 
     @inlineCallbacks
     def test_client_register(self):
@@ -240,7 +309,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'voice test .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -265,7 +334,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'voice test .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
         }))
 
         self.client.sendDtmfEvent('5')
@@ -301,31 +370,29 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
     def test_speech_url_list(self):
         [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
+        urls = [
+            'http://example.com/speech_url_test1.ogg',
+            'http://example.com/speech_url_test2.ogg'
+        ]
 
         msg = yield self.tx_helper.make_dispatch_reply(
             reg, 'speech url test', helper_metadata={
                 'voice': {
-                    'speech_url': [
-                        'http://example.com/speech_url_test1.ogg',
-                        'http://example.com/speech_url_test2.ogg'
-                    ]
+                    'speech_url': urls,
                 }
             })
 
         cmd = yield self.client.queue.get()
+        urllist = 'file_string://%s' % '!'.join(urls)
         self.assertEqual(cmd, EslCommand.from_dict({
             'type': 'sendmsg', 'name': 'playback',
-            'arg': 'http://example.com/speech_url_test1.ogg',
-        }))
-        cmd = yield self.client.queue.get()
-        self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback',
-            'arg': 'http://example.com/speech_url_test2.ogg',
+            'arg': urllist,
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(ack['user_message_id'], msg['message_id'])
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
+        self.assertEqual(ack['event_type'], 'ack')
 
     @inlineCallbacks
     def test_speech_url_invalid_url(self):
@@ -334,7 +401,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
             [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
             self.tx_helper.clear_dispatched_inbound()
 
-            yield self.tx_helper.make_dispatch_reply(
+            msg = yield self.tx_helper.make_dispatch_reply(
                 reg, 'speech url test', helper_metadata={
                     'voice': {
                         'speech_url': url
@@ -343,9 +410,14 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         [warn_log] = lc.messages()
         self.assertEqual(warn_log, "Invalid URL %r" % url)
 
+        [nack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(nack['user_message_id'], msg['message_id'])
+        self.assertEqual(nack['event_type'], 'nack')
+        self.assertEqual(nack['nack_reason'], 'Invalid URL %r' % url)
+
     @inlineCallbacks
     def test_speech_invalid_url_list(self):
-        valid_url = 'http://example.com/speech_url_test1.ogg'
+        valid_url = u'http://example.com/speech_url_test1.ogg'
         invalid_url1 = 7
         invalid_url2 = 8
         with LogCatcher(log_level=logging.WARN) as lc:
@@ -363,19 +435,14 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
                     }
                 })
 
-        cmd = yield self.client.queue.get()
-        self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback',
-            'arg': valid_url,
-        }))
-
-        [ack] = yield self.tx_helper.get_dispatched_events()
-        self.assertEqual(ack['user_message_id'], msg['message_id'])
-        self.assertEqual(ack['sent_message_id'], msg['message_id'])
-
-        [log1, log2] = lc.messages()
-        self.assertEqual(log1, 'Invalid URL %r' % invalid_url1)
-        self.assertEqual(log2, 'Invalid URL %r' % invalid_url2)
+        [log] = lc.messages()
+        self.assertEqual(log, 'Invalid URL list %r' % (
+            [invalid_url1, valid_url, invalid_url2], ))
+        [nack] = yield self.tx_helper.get_dispatched_events()
+        self.assertEqual(nack['user_message_id'], msg['message_id'])
+        self.assertEqual(nack['event_type'], 'nack')
+        self.assertEqual(nack['nack_reason'], 'Invalid URL list %r' % (
+            [invalid_url1, valid_url, invalid_url2], ))
 
     @inlineCallbacks
     def test_reply_to_client_that_has_hung_up(self):
@@ -395,6 +462,67 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(nack['user_message_id'], msg['message_id'])
         self.assertEqual(nack['nack_reason'],
                          "Client u'test-uuid' no longer connected")
+
+    @inlineCallbacks
+    def test_barge_in_defaults(self):
+        '''Barge ins should use the play_and_get_digits command with certain
+        default values.'''
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                },
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assert_get_digits_command(cmd, "say:'barge in test . '")
+
+    @inlineCallbacks
+    def test_barge_in_non_defaults(self):
+        '''When the correct fields are specified, these should override the
+        defaults.'''
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                    'wait_for': '#',
+                    'tries': 2,
+                    'time_gap': 5000,
+                },
+            })
+
+        cmd = yield self.client.queue.get()
+        self.assert_get_digits_command(
+            cmd, "say:'barge in test . '", minimum=0, maximum=128,
+            terminator='#', tries=2, timeout=5000)
+
+    @inlineCallbacks
+    def test_barge_in_collecting_digits(self):
+        '''If we send a barge in message, we should collect the digits that
+        the client has sent us.'''
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.tx_helper.clear_dispatched_inbound()
+
+        yield self.tx_helper.make_dispatch_reply(
+            reg, 'barge in test', helper_metadata={
+                'voice': {
+                    'barge_in': True,
+                    'wait_for': '#',
+                },
+            })
+
+        self.client.sendDtmfEvent('5')
+        self.client.sendDtmfEvent('6')
+        self.client.sendDtmfEvent('#')
+
+        [msg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(msg['content'], '56')
 
 
 class TestVoiceServerTransportOutboundCalls(VumiTestCase):
@@ -440,7 +568,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
         cmd = yield client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'speak', 'arg': 'foobar .',
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'foobar . '",
         }))
 
         [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
