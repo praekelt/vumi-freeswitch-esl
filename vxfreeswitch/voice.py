@@ -419,9 +419,6 @@ class VoiceServerTransport(Transport):
         content = u"\n".join(content.splitlines())
         content = content.encode('utf-8')
 
-        overrideURL = None
-        client.set_input_type(None)
-
         voicemeta = get_in(message, 'helper_metadata', 'voice', default={})
         client.set_input_type(voicemeta.get('wait_for', None))
         overrideURL = voicemeta.get('speech_url', None)
