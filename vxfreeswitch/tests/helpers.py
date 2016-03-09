@@ -266,6 +266,8 @@ class FakeFreeSwitchProtocol(LineReceiver):
                     self.queue.put(cmd)
                 elif cmd_name == "playback":
                     self.queue.put(cmd)
+                elif cmd_name == "play_and_get_digits":
+                    self.queue.put(cmd)
 
     def connectionLost(self, reason):
         self.connected = False
