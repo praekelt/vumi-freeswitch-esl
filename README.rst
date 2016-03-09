@@ -47,7 +47,7 @@ may contain the following keys:
     A boolean value that if ``True``, stops the playback of the message when
     a DTMF character arrives. This allows the response to the input to be
     played immediately, rather than waiting for the first message to finish
-    playing before hearing the response message.
+    playing before hearing the response message. Defaults to ``False``.
 :``tries``:
    If ``barge_in`` is ``True``, this will set the amount of times a message is
    played if no input is received. Defaults to ``1``.
