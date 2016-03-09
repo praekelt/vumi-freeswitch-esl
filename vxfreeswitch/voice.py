@@ -126,7 +126,7 @@ class FreeSwitchESLProtocol(EventProtocol):
         return self.stream_text_as_speech(text, settings=settings)
 
     def output_stream(self, message, settings={}):
-        self.log("Playing back: %r" % (message,))
+        self.vumi_transport.log.info("Playing back: %r" % (message,))
         if settings.get('barge_in'):
             terminator = settings.get('wait_for')
             if terminator is None:
@@ -158,12 +158,14 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
-        self.log("execute complete " + ev.variable_call_uuid)
+        self.vumi_transport.log.info(
+            "execute complete: %s (%s)" % (
+                ev.Application, ev.variable_call_uuid))
         if self.request_hang_up:
             yield self.hangup()
 
     def onChannelHangupComplete(self, ev):
-        self.log("Channel HangUp")
+        self.vumi_transport.log.info("Channel HangUp (%s)" % self.uniquecallid)
         try:
             answered_time = int(ev.get('Caller_Channel_Answered_Time'))
             hangup_time = int(ev.get('Caller_Channel_Hangup_Time'))
@@ -175,15 +177,17 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.deregister_client(self, duration)
 
     def onDisconnect(self, ev):
-        self.log("Channel disconnect received")
+        self.vumi_transport.log.info(
+            "Channel disconnect received (%s)" % self.uniquecallid)
         self.vumi_transport.deregister_client(self)
 
     def onChannelAnswer(self, ev):
-        self.log("Channel answered")
+        self.vumi_transport.log.info(
+            "Channel answered (%s)" % self.uniquecallid)
         self.vumi_transport.client_answered(self)
 
     def unboundEvent(self, evdata, evname):
-        self.log("Unbound event %r" % (evname,))
+        self.vumi_transport.log.debug("Unbound event %r" % (evname,))
 
 
 class FreeSwitchESLFactory(ServerFactory):
