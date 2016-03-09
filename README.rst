@@ -28,7 +28,7 @@ Usage
 -----
 
 Voice transports may receive additional hints for how to handle outbound
-messages the ``voice`` section of ``helper_metadata``. The ``voice`` section
+messages in the ``voice`` section of ``helper_metadata``. The ``voice`` section
 may contain the following keys:
 
 :``speech_url``:
@@ -49,12 +49,12 @@ may contain the following keys:
     played immediately, rather than waiting for the first message to finish
     playing before hearing the response message. Defaults to ``False``.
 :``tries``:
-   If ``barge_in`` is ``True``, this will set the amount of times a message is
+   If ``barge_in`` is ``True``, this will set the number of times a message is
    played if no input is received. Defaults to ``1``.
 :``time_gap``:
    If ``barge_in`` is ``True`` and ``tries`` is greater than ``1``, this
-   specifies the time gap (in ms) that is given before repeating the message,
-   if no DTMF characters are received. Defaults to ``3000``.
+   specifies the length of the pause (in ms) that is given before repeating
+   the message, if no DTMF characters are received. Defaults to ``3000``.
 
 Example:
 
