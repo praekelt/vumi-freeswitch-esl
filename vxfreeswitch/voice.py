@@ -100,7 +100,8 @@ class FreeSwitchESLProtocol(EventProtocol):
     def send_text_as_speech(self, engine, voice, message, settings={}):
         yield self.set("tts_engine=" + engine)
         yield self.set("tts_voice=" + voice)
-        yield self.output_stream("say:'%s'" % message, settings)
+        yield self.output_stream(
+            "say:'%s'" % message.replace("'", "\\'"), settings)
 
     @inlineCallbacks
     def stream_text_as_speech(self, message, settings):
