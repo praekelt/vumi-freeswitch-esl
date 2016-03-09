@@ -208,6 +208,17 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
             'foo', minimum=0, maximum=128, tries=2, timeout=5000,
             terminator='#')
 
+    @inlineCallbacks
+    def test_send_text_as_speech_quote_escaping(self):
+        '''If there are any single quotes in the text that we are converting
+        to speech, we should escape those quotes before sending it to
+        freeswitch, since we send the text string within single quotes.'''
+        d = self.proto.send_text_as_speech(
+            "thomas", "his_masters_voice", "text with single quote's")
+        yield self.assert_and_reply_tts(
+            "thomas", "his_masters_voice", "text with single quote\\'s")
+        yield d
+
 
 class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
