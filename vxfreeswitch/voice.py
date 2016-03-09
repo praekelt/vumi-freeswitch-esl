@@ -82,7 +82,8 @@ class FreeSwitchESLProtocol(EventProtocol):
         return cmd, args
 
     @inlineCallbacks
-    def create_and_stream_text_as_speech(self, folder, command, ext, message):
+    def create_and_stream_text_as_speech(
+            self, folder, command, ext, message, settings={}):
         key = md5.md5(message).hexdigest()
         filename = os.path.join(folder, "voice-%s.%s" % (key, ext))
         if not os.path.exists(filename):
@@ -92,25 +93,28 @@ class FreeSwitchESLProtocol(EventProtocol):
         else:
             log.msg("Using cached voice file %r" % (filename,))
 
-        yield self.playback(filename)
+        yield self.output_stream(filename, settings)
 
     @inlineCallbacks
-    def send_text_as_speech(self, engine, voice, message):
+    def send_text_as_speech(self, engine, voice, message, settings={}):
         yield self.set("tts_engine=" + engine)
         yield self.set("tts_voice=" + voice)
-        yield self.execute("speak", message)
+        # 'say:' is misleading here, it functions more like 'speak' in this
+        # context.
+        yield self.output_stream(
+            "say:'%s'" % message.replace("'", "\\'"), settings)
 
     @inlineCallbacks
-    def stream_text_as_speech(self, message):
+    def stream_text_as_speech(self, message, settings):
         finalmessage = message.replace("\n", " . ")
         cfg = self.vumi_transport.config
         if cfg.tts_type == "local":
             yield self.create_and_stream_text_as_speech(
                 cfg.tts_local_cache, cfg.tts_local_command,
-                cfg.tts_local_ext, finalmessage)
+                cfg.tts_local_ext, finalmessage, settings)
         elif cfg.tts_type == "freeswitch":
             yield self.send_text_as_speech(
-                cfg.tts_fs_engine, cfg.tts_fs_voice, finalmessage)
+                cfg.tts_fs_engine, cfg.tts_fs_voice, finalmessage, settings)
         else:
             raise VoiceError("Unknown tts_type %r" % (
                 cfg.tts_type,))
@@ -118,13 +122,33 @@ class FreeSwitchESLProtocol(EventProtocol):
     def get_address(self):
         return self.uniquecallid
 
-    def output_message(self, text):
-        self.log("Sending text as speech: %r" % (text,))
-        return self.stream_text_as_speech(text)
+    def output_message(self, text, settings={}):
+        return self.stream_text_as_speech(text, settings=settings)
 
-    def output_stream(self, url):
-        self.log("Playing back URL: %r" % (url,))
-        return self.playback(url)
+    def output_stream(self, message, settings={}):
+        self.log("Playing back: %r" % (message,))
+        if settings.get('barge_in'):
+            terminator = settings.get('wait_for')
+            if terminator is None:
+                # We just want to get 1 digit
+                minimum, maximum = 1, 1
+                # We don't want a terminating character, but we have to supply
+                # one, so we supply a blank one
+                terminator = "''"
+            else:
+                # 128 is the maximum amount of digits that freeswitch can
+                # collect
+                minimum, maximum = 0, 128
+            tries = settings.get('tries', 1)
+            timeout = settings.get('time_gap', 3000)
+            # We have to have an invalid response message, so we set it to
+            # 1ms of silence
+            invalid_message = 'silence_stream://1'
+            return self.execute('play_and_get_digits', ' '.join([
+                str(minimum), str(maximum), str(tries), str(timeout),
+                str(terminator), message, invalid_message]))
+        else:
+            return self.playback(message)
 
     def set_input_type(self, input_type):
         self.input_type = input_type
@@ -132,10 +156,11 @@ class FreeSwitchESLProtocol(EventProtocol):
     def close_call(self):
         self.request_hang_up = True
 
+    @inlineCallbacks
     def onChannelExecuteComplete(self, ev):
         self.log("execute complete " + ev.variable_call_uuid)
         if self.request_hang_up:
-            return self.hangup()
+            yield self.hangup()
 
     def onChannelHangupComplete(self, ev):
         self.log("Channel HangUp")
@@ -383,6 +408,12 @@ class VoiceServerTransport(Transport):
         )
 
     @inlineCallbacks
+    def log_and_nack(self, message, error):
+        self.log.warning(error)
+        yield self.publish_nack(
+            message["message_id"], reason=error)
+
+    @inlineCallbacks
     def send_outbound_message(self, client, message):
         content = message['content']
         if content is None:
@@ -390,14 +421,9 @@ class VoiceServerTransport(Transport):
         content = u"\n".join(content.splitlines())
         content = content.encode('utf-8')
 
-        overrideURL = None
-        client.set_input_type(None)
-        if 'helper_metadata' in message:
-            meta = message['helper_metadata']
-            if 'voice' in meta:
-                voicemeta = meta['voice']
-                client.set_input_type(voicemeta.get('wait_for', None))
-                overrideURL = voicemeta.get('speech_url', None)
+        voicemeta = get_in(message, 'helper_metadata', 'voice', default={})
+        client.set_input_type(voicemeta.get('wait_for', None))
+        overrideURL = voicemeta.get('speech_url', None)
 
         # Wait if call isn't answered
         if self._unanswered_channels.get(client.get_address()):
@@ -409,17 +435,21 @@ class VoiceServerTransport(Transport):
                 returnValue(None)
 
         if overrideURL is None:
-            yield client.output_message("%s\n" % content)
+            yield client.output_message("%s\n" % content, voicemeta)
         elif isinstance(overrideURL, basestring):
-            yield client.output_stream(overrideURL)
+            yield client.output_stream(overrideURL, voicemeta)
         elif isinstance(overrideURL, list):
-            for url in overrideURL:
-                if isinstance(url, basestring):
-                    yield client.output_stream(url)
-                else:
-                    log.warning("Invalid URL %r" % url)
+            try:
+                urllist = 'file_string://%s' % '!'.join(overrideURL)
+                yield client.output_stream(urllist, voicemeta)
+            except TypeError:
+                error = "Invalid URL list %r" % overrideURL
+                yield self.log_and_nack(message, error)
+                return
         else:
-            log.warning("Invalid URL %r" % overrideURL)
+            error = "Invalid URL %r" % overrideURL
+            yield self.log_and_nack(message, error)
+            return
 
         if message['session_event'] == TransportUserMessage.SESSION_CLOSE:
             client.close_call()
@@ -474,3 +504,11 @@ class VoiceServerTransport(Transport):
             return
 
         yield self.send_outbound_message(client, message)
+
+
+def get_in(d, *args, **kwargs):
+    for arg in args:
+        d = d.get(arg)
+        if d is None:
+            return kwargs.get('default')
+    return d
