@@ -59,7 +59,7 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     def log(self, msg, level=logging.INFO):
         self.vumi_transport.log.msg(
-            '[%s] %s' % (self.uniquecallid, msg), level=level)
+            '[%s] %s' % (self.uniquecallid, msg), logLevel=level)
 
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
