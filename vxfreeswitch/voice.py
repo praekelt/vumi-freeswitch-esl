@@ -41,7 +41,6 @@ class VoiceError(VumiError):
 
 
 class FreeSwitchESLProtocol(EventProtocol):
-    VAR_NAME = 'digits'
 
     def __init__(self, vumi_transport):
         EventProtocol.__init__(self)
@@ -145,8 +144,7 @@ class FreeSwitchESLProtocol(EventProtocol):
             invalid_message = 'silence_stream://1'
             return self.execute('play_and_get_digits', ' '.join([
                 str(minimum), str(maximum), str(tries), str(timeout),
-                str(terminator), message, invalid_message, self.VAR_NAME,
-                r'[\d\*#]*']))
+                str(terminator), message, invalid_message]))
         else:
             return self.playback(message)
 
