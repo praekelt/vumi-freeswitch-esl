@@ -94,15 +94,14 @@ class TestFreeSwitchESLProtocol(VumiTestCase):
     @inlineCallbacks
     def assert_and_reply_get_digits(self, msg, **kwargs):
         params = {
-            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "' '",
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "''",
             'tries': 1, 'msg': msg,
         }
         params.update(kwargs)
         yield self.assert_and_reply({
             "type": "sendmsg", "name": "play_and_get_digits",
             "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
-                    "%(terminator)s %(msg)s silence_stream://1 digits "
-                    "[\\d\\*#]*") % params,
+                    "%(terminator)s %(msg)s silence_stream://1") % params,
         }, "+OK")
 
     def test_create_tts_command(self):
@@ -233,15 +232,14 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
     def assert_get_digits_command(self, cmd, msg, **kwargs):
         params = {
-            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "' '",
+            'minimum': 1, 'maximum': 1, 'timeout': 3000, 'terminator': "''",
             'tries': 1, 'msg': msg,
         }
         params.update(kwargs)
         self.assertEqual(cmd, EslCommand.from_dict({
             'type': 'sendmsg', 'name': 'play_and_get_digits',
             "arg": ("%(minimum)d %(maximum)d %(tries)d %(timeout)d "
-                    "%(terminator)s %(msg)s silence_stream://1 digits "
-                    "[\\d\\*#]*") % params,
+                    "%(terminator)s %(msg)s silence_stream://1") % params,
         }))
 
     @inlineCallbacks
