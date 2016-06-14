@@ -30,7 +30,6 @@ from vumi.transports import Transport
 from vumi.message import TransportUserMessage
 from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint
 from vumi.errors import VumiError
-from vumi import log
 
 from vxfreeswitch.originate import (
     OriginateFormatter, OriginateMissingParameter)
@@ -53,12 +52,13 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     # NOTE: These were lifted straight from eventsocket's github code
     #       Once https://github.com/fiorix/eventsocket/issues/11 is closed
-    #       This code (and the vumi.log import) can be undone
     def unknownContentType(self, content_type, ctx):
-        log.debug("[eventsocket] unknown Content-Type: %s" % content_type)
+        self.vumi_transport.log.debug(
+            "[eventsocket] unknown Content-Type: %s" % content_type)
 
     def unboundEvent(self, ctx, evname):
-        log.debug("[eventsocket] unbound Event: %s" % evname)
+        self.vumi_transport.log.debug(
+            "[eventsocket] unbound Event: %s" % evname)
 
     @inlineCallbacks
     def connectionMade(self):
