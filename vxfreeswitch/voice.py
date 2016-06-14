@@ -50,8 +50,6 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.input_type = None
         self.uniquecallid = None
 
-    # NOTE: These were lifted straight from eventsocket's github code
-    #       Once https://github.com/fiorix/eventsocket/issues/11 is closed
     def unknownContentType(self, content_type, ctx):
         self.vumi_transport.log.debug(
             "[eventsocket] unknown Content-Type: %s" % content_type)
