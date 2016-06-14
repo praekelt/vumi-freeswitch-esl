@@ -50,6 +50,14 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.input_type = None
         self.uniquecallid = None
 
+    def unknownContentType(self, content_type, ctx):
+        self.vumi_transport.log.debug(
+            "[eventsocket] unknown Content-Type: %s" % content_type)
+
+    def unboundEvent(self, ctx, evname):
+        self.vumi_transport.log.debug(
+            "[eventsocket] unbound Event: %s" % evname)
+
     @inlineCallbacks
     def connectionMade(self):
         yield self.connect().addCallback(self.on_connect)
