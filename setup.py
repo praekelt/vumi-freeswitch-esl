@@ -15,7 +15,7 @@ setup(
         'vumi',
         'confmodel>=0.2.0',
         'Twisted>=13.1.0',
-        'eventsocket==0.1.4',
+        'eventsocket==0.1.5',
     ],
     classifiers=[
         'Development Status :: 4 - Beta',
