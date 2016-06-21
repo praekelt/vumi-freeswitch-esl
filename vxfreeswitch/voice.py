@@ -24,7 +24,7 @@ from twisted.internet.utils import getProcessOutput
 from eventsocket import EventProtocol
 
 from confmodel.errors import ConfigError
-from confmodel.fields import ConfigText, ConfigDict
+from confmodel.fields import ConfigText, ConfigDict, ConfigBool
 
 from vumi.transports import Transport
 from vumi.message import TransportUserMessage
@@ -271,6 +271,11 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
         },
         default=None, static=True)
 
+    wait_for_answer = ConfigBool(
+        "If True, the transport waits for a ChannelAnswer event for outbound "
+        "(originated) calls before playing any media.",
+        default=True, static=True)
+
     @property
     def supports_outbound(self):
         return self.freeswitch_endpoint is not None
@@ -482,7 +487,8 @@ class VoiceServerTransport(Transport):
         self.log.info("Dialing outbound via Freeswitch ESL: %r" % command)
         reply = yield self.voice_client.api(command)
         call_uuid = reply.args[1]
-        self._unanswered_channels[call_uuid] = Deferred()
+        if self.config.wait_for_answer:
+            self._unanswered_channels[call_uuid] = Deferred()
         returnValue(call_uuid)
 
     @inlineCallbacks
