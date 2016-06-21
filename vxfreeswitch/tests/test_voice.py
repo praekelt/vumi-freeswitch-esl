@@ -530,11 +530,12 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
 
-    @inlineCallbacks
     def setUp(self):
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
         self.esl_helper = self.add_helper(EslHelper())
-        self.worker = yield self.tx_helper.get_transport({
+
+    def create_worker(self, config={}):
+        default = {
             'twisted_endpoint': 'tcp:port=0',
             'freeswitch_endpoint': 'tcp:127.0.0.1:port=1337',
             'originate_parameters': {
@@ -543,10 +544,13 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
                 'cid_name': 'elcid',
                 'cid_num': '+1234'
             },
-        })
+        }
+        default.update(config)
+        return self.tx_helper.get_transport(default)
 
     @inlineCallbacks
     def test_create_call(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server()
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
@@ -578,6 +582,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_connect_error(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server(
             fail_connect=True, uuid=lambda: 'uuid-1234')
         factory.add_fixture(
@@ -600,6 +605,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_client_disconnect_without_answer(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server()
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
