@@ -631,3 +631,33 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         self.assertEqual(nack['event_type'], 'nack')
         self.assertEqual(nack['nack_reason'], 'Unanswered Call')
         self.assertEqual(nack['user_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_wait_for_answer_false(self):
+        '''If the wait_for_answer config field is False, then we shouldn't wait
+        for a ChannelAnswer event before playing media.'''
+        self.worker = yield self.create_worker({'wait_for_answer': False})
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK uuid-1234"))
+
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+
+        yield self.tx_helper.dispatch_outbound(msg)
+
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+
+        # We are not sending a ChannelAnswer event, but we expect a sendmsg
+        # command to be sent anyway, because wait_for_answer is False
+
+        cmd = yield client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'foobar . '",
+        }))
+
+        [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
