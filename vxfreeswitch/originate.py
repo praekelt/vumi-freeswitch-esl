@@ -57,7 +57,7 @@ class OriginateFormatter(object):
     E.g. ::
 
         formatter = OriginateFormatter(
-            call_url='sofia/gateway/yogisip/{to_addr}',
+            call_url='{{origination_uuid={uuid}}}sofia/gateway/yogisip/{to_addr}',
             exten='{from_addr}',
             cid_name='vxfreeswitch',
             cid_id='{from_addr}',
@@ -85,7 +85,7 @@ class OriginateFormatter(object):
     def __init__(self, **kw):
         self.template = self.format_template(**kw)
 
-    def format_call(self, from_addr, to_addr):
+    def format_call(self, from_addr, to_addr, uuid):
         """ Return a formatted originate call.
 
         :param str from_addr:
@@ -94,11 +94,14 @@ class OriginateFormatter(object):
         :param str to_addr:
             The address the call is to.
 
+        :param str uuid:
+            The UUID that the originated call should have.
+
         :returns str:
             A formatted originate call for passing to Freeswitch.
         """
         return self.template.format(
-            from_addr=from_addr, to_addr=to_addr)
+            from_addr=from_addr, to_addr=to_addr, uuid=uuid)
 
     @classmethod
     def format_template(cls, **kw):

@@ -24,7 +24,7 @@ from twisted.internet.utils import getProcessOutput
 from eventsocket import EventProtocol
 
 from confmodel.errors import ConfigError
-from confmodel.fields import ConfigText, ConfigDict
+from confmodel.fields import ConfigText, ConfigDict, ConfigBool
 
 from vumi.transports import Transport
 from vumi.message import TransportUserMessage
@@ -49,6 +49,14 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.current_input = ''
         self.input_type = None
         self.uniquecallid = None
+
+    def unknownContentType(self, content_type, ctx):
+        self.vumi_transport.log.debug(
+            "[eventsocket] unknown Content-Type: %s" % content_type)
+
+    def unboundEvent(self, ctx, evname):
+        self.vumi_transport.log.debug(
+            "[eventsocket] unbound Event: %s" % evname)
 
     @inlineCallbacks
     def connectionMade(self):
@@ -263,6 +271,11 @@ class VoiceServerTransportConfig(Transport.CONFIG_CLASS):
         },
         default=None, static=True)
 
+    wait_for_answer = ConfigBool(
+        "If True, the transport waits for a ChannelAnswer event for outbound "
+        "(originated) calls before playing any media.",
+        default=True, static=True)
+
     @property
     def supports_outbound(self):
         return self.freeswitch_endpoint is not None
@@ -470,16 +483,19 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
-        command = self.originate_formatter.format_call(self._to_addr, to_addr)
+        call_uuid = self.generate_message_id()
+        command = self.originate_formatter.format_call(
+            self._to_addr, to_addr, call_uuid)
         self.log.info("Dialing outbound via Freeswitch ESL: %r" % command)
         reply = yield self.voice_client.api(command)
-        call_uuid = reply.args[1]
-        self._unanswered_channels[call_uuid] = Deferred()
+        if call_uuid not in command:
+            call_uuid = reply.args[1]
+        if self.config.wait_for_answer:
+            self._unanswered_channels[call_uuid] = Deferred()
         returnValue(call_uuid)
 
     @inlineCallbacks
     def handle_outbound_message(self, message):
-
         client_addr = message['to_addr']
         client = self._clients.get(client_addr)
 

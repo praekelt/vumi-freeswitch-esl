@@ -530,11 +530,12 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
 
-    @inlineCallbacks
     def setUp(self):
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
         self.esl_helper = self.add_helper(EslHelper())
-        self.worker = yield self.tx_helper.get_transport({
+
+    def create_worker(self, config={}):
+        default = {
             'twisted_endpoint': 'tcp:port=0',
             'freeswitch_endpoint': 'tcp:127.0.0.1:port=1337',
             'originate_parameters': {
@@ -543,10 +544,13 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
                 'cid_name': 'elcid',
                 'cid_num': '+1234'
             },
-        })
+        }
+        default.update(config)
+        return self.tx_helper.get_transport(default)
 
     @inlineCallbacks
     def test_create_call(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server()
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
@@ -578,6 +582,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_connect_error(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server(
             fail_connect=True, uuid=lambda: 'uuid-1234')
         factory.add_fixture(
@@ -600,6 +605,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     @inlineCallbacks
     def test_client_disconnect_without_answer(self):
+        self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server()
         factory.add_fixture(
             EslCommand("api originate /sofia/gateway/yogisip"
@@ -625,3 +631,82 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         self.assertEqual(nack['event_type'], 'nack')
         self.assertEqual(nack['nack_reason'], 'Unanswered Call')
         self.assertEqual(nack['user_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_wait_for_answer_false(self):
+        '''If the wait_for_answer config field is False, then we shouldn't wait
+        for a ChannelAnswer event before playing media.'''
+        self.worker = yield self.create_worker({'wait_for_answer': False})
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK uuid-1234"))
+
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+
+        yield self.tx_helper.dispatch_outbound(msg)
+
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+
+        # We are not sending a ChannelAnswer event, but we expect a sendmsg
+        # command to be sent anyway, because wait_for_answer is False
+
+        cmd = yield client.queue.get()
+        self.assertEqual(cmd, EslCommand.from_dict({
+            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'foobar . '",
+        }))
+
+        [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_use_our_generated_uuid_if_in_originate_command(self):
+        '''If our generated uuid is in the resulting originate command, we
+        should use that uuid instead of the one provided by freeswitch.'''
+        self.worker = yield self.create_worker({
+            'originate_parameters': {
+                'call_url': '{{origination_uuid={uuid}}}sofia/gateway/yogisip',
+                'exten': '100',
+                'cid_name': 'elcid',
+                'cid_num': '+1234',
+            },
+        })
+
+        def static_id():
+            return 'test-uuid-1234'
+
+        self.worker.generate_message_id = static_id
+
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand(
+                "api originate {origination_uuid=test-uuid-1234}sofia/gateway/"
+                "yogisip 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK wrong-uuid-1234"))
+
+        uuid = yield self.worker.dial_outbound("+4321")
+        self.assertEqual(uuid, 'test-uuid-1234')
+
+    @inlineCallbacks
+    def test_use_freeswitch_uuid_if_not_in_originate_command(self):
+        '''If the generated uuid is not in the resulting originate command, we
+        should use the uuid from freeswitch instead.import'''
+        self.worker = yield self.create_worker()
+
+        def static_id():
+            return 'wrong-uuid-1234'
+
+        self.worker.generate_message_id = static_id
+
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand(
+                "api originate /sofia/gateway/"
+                "yogisip 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK correct-uuid-1234"))
+
+        uuid = yield self.worker.dial_outbound("+4321")
+        self.assertEqual(uuid, 'correct-uuid-1234')
