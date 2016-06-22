@@ -9,7 +9,8 @@ from vxfreeswitch.originate import (
 class TestOriginateFormatter(TestCase):
     def mk_params(self, **kw):
         params = {
-            'call_url': 'sofia/gateway/yogisip/{to_addr}',
+            'call_url':
+                '{{origination_uuid={uuid}}}sofia/gateway/yogisip/{to_addr}',
             'exten': '100',
             'cid_name': 'elcid',
             'cid_num': '{from_addr}',
@@ -27,8 +28,8 @@ class TestOriginateFormatter(TestCase):
     def test_format_template(self):
         self.assertEqual(
             self.mk_template(),
-            "originate sofia/gateway/yogisip/{to_addr}"
-            " 100 XML default elcid {from_addr} 60")
+            "originate {{origination_uuid={uuid}}}sofia/gateway/yogisip/"
+            "{to_addr} 100 XML default elcid {from_addr} 60")
 
     def test_format_template_missing_parameter(self):
         err = self.assertRaises(
@@ -40,8 +41,8 @@ class TestOriginateFormatter(TestCase):
         formatter = self.mk_formatter()
         self.assertEqual(
             formatter.template,
-            "originate sofia/gateway/yogisip/{to_addr}"
-            " 100 XML default elcid {from_addr} 60")
+            "originate {{origination_uuid={uuid}}}sofia/gateway/yogisip/"
+            "{to_addr} 100 XML default elcid {from_addr} 60")
 
     def test_init_missing_parameter(self):
         err = self.assertRaises(
@@ -52,6 +53,7 @@ class TestOriginateFormatter(TestCase):
     def test_format_call(self):
         formatter = self.mk_formatter()
         self.assertEqual(
-            formatter.format_call(to_addr="+1234", from_addr="1099"),
-            "originate sofia/gateway/yogisip/+1234"
+            formatter.format_call(
+                to_addr="+1234", from_addr="1099", uuid='test-uuid'),
+            "originate {origination_uuid=test-uuid}sofia/gateway/yogisip/+1234"
             " 100 XML default elcid 1099 60")
