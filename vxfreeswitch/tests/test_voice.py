@@ -530,6 +530,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
+    SLEEP_TIME = 0.01
 
     def setUp(self):
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
@@ -549,6 +550,11 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         default.update(config)
         return self.tx_helper.get_transport(default)
 
+    def sleep(self, time=SLEEP_TIME):
+        d = defer.Deferred()
+        reactor.callLater(time, d.callback, None)
+        return d
+
     @inlineCallbacks
     def wait_for_client_registration(self, worker, clientid):
         '''Waits until the client has registered itself to the worker. Returns
@@ -556,9 +562,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         for _ in range(5):
             if worker._originated_calls.get(clientid, None) is None:
                 returnValue(True)
-            d = defer.Deferred()
-            reactor.callLater(0.01, d.callback, None)
-            yield d
+            yield self.sleep()
         returnValue(False)
 
     @inlineCallbacks
@@ -568,9 +572,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         for _ in range(5):
             if worker._unanswered_channels.get(callid, None) is None:
                 returnValue(True)
-            d = defer.Deferred()
-            reactor.callLater(0.01, d.callback, None)
-            yield d
+            yield self.sleep()
         returnValue(False)
 
     @inlineCallbacks
