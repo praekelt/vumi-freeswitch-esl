@@ -661,3 +661,52 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_use_our_generated_uuid_if_in_originate_command(self):
+        '''If our generated uuid is in the resulting originate command, we
+        should use that uuid instead of the one provided by freeswitch.'''
+        self.worker = yield self.create_worker({
+            'originate_parameters': {
+                'call_url': '{{origination_uuid={uuid}}}sofia/gateway/yogisip',
+                'exten': '100',
+                'cid_name': 'elcid',
+                'cid_num': '+1234',
+            },
+        })
+
+        def static_id():
+            return 'test-uuid-1234'
+
+        self.worker.generate_message_id = static_id
+
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand(
+                "api originate {origination_uuid=test-uuid-1234}sofia/gateway/"
+                "yogisip 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK wrong-uuid-1234"))
+
+        uuid = yield self.worker.dial_outbound("+4321")
+        self.assertEqual(uuid, 'test-uuid-1234')
+
+    @inlineCallbacks
+    def test_use_freeswitch_uuid_if_not_in_originate_command(self):
+        '''If the generated uuid is not in the resulting originate command, we
+        should use the uuid from freeswitch instead.import'''
+        self.worker = yield self.create_worker()
+
+        def static_id():
+            return 'wrong-uuid-1234'
+
+        self.worker.generate_message_id = static_id
+
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand(
+                "api originate /sofia/gateway/"
+                "yogisip 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK correct-uuid-1234"))
+
+        uuid = yield self.worker.dial_outbound("+4321")
+        self.assertEqual(uuid, 'correct-uuid-1234')
