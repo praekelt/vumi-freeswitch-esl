@@ -6,7 +6,7 @@ import logging
 import md5
 import os
 
-from twisted.internet.defer import inlineCallbacks
+from twisted.internet.defer import inlineCallbacks, returnValue
 from twisted.internet import defer, reactor
 
 from vumi.message import TransportUserMessage
@@ -550,6 +550,30 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         return self.tx_helper.get_transport(default)
 
     @inlineCallbacks
+    def wait_for_client_registration(self, worker, clientid):
+        '''Waits until the client has registered itself to the worker. Returns
+        False if it times out waiting.'''
+        for _ in range(5):
+            if worker._originated_calls.get(clientid, None) is None:
+                returnValue(True)
+            d = defer.Deferred()
+            reactor.callLater(0.01, d.callback, None)
+            yield d
+        returnValue(False)
+
+    @inlineCallbacks
+    def wait_for_call_answer(self, worker, callid):
+        '''Waits until the call has been answered. Returns False if it times
+        out waiting.'''
+        for _ in range(5):
+            if worker._unanswered_channels.get(callid, None) is None:
+                returnValue(True)
+            d = defer.Deferred()
+            reactor.callLater(0.01, d.callback, None)
+            yield d
+        returnValue(False)
+
+    @inlineCallbacks
     def test_create_call(self):
         self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server()
@@ -567,14 +591,15 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
         client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
         # We need to wait for the client to be registered on the worker
-        d = defer.Deferred()
-        reactor.callLater(0.1, d.callback, None)
-        yield d
+        r = yield self.wait_for_client_registration(self.worker, 'uuid-1234')
+        self.assertTrue(r)
 
         events = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(events, [])
 
         client.sendChannelAnswerEvent()
+        r = yield self.wait_for_call_answer(self.worker, 'uuid-1234')
+        self.assertTrue(r)
 
         cmd = yield client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
