@@ -443,10 +443,12 @@ class VoiceServerTransport(Transport):
         # Wait if call isn't answered
         if self._unanswered_channels.get(client.get_address()):
             try:
-                yield self._unanswered_channels.pop(client.get_address())
+                yield self._unanswered_channels.get(client.get_address())
+                self._unanswered_channels.pop(client.get_address())
             except FreeSwitchClientError:
                 yield self.publish_nack(
                     message['message_id'], 'Unanswered Call')
+                self._unanswered_channels.pop(client.get_address())
                 returnValue(None)
 
         if overrideURL is None:
@@ -474,7 +476,7 @@ class VoiceServerTransport(Transport):
     def client_answered(self, client):
         """Function that is called when the ChannelAnswer event is received.
         Fires the deferred related to the outbound call"""
-        d = self._unanswered_channels.pop(client.get_address(), None)
+        d = self._unanswered_channels.get(client.get_address(), None)
         if d:
             d.callback(None)
         else:
