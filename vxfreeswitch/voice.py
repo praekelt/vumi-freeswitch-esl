@@ -444,12 +444,12 @@ class VoiceServerTransport(Transport):
         if self._unanswered_channels.get(client.get_address()):
             try:
                 yield self._unanswered_channels.get(client.get_address())
-                self._unanswered_channels.pop(client.get_address())
             except FreeSwitchClientError:
                 yield self.publish_nack(
                     message['message_id'], 'Unanswered Call')
-                self._unanswered_channels.pop(client.get_address())
                 returnValue(None)
+            finally:
+                self._unanswered_channels.pop(client.get_address())
 
         if overrideURL is None:
             yield client.output_message("%s\n" % content, voicemeta)
