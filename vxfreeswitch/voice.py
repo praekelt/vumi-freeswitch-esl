@@ -26,8 +26,6 @@ from eventsocket import EventProtocol
 from confmodel.errors import ConfigError
 from confmodel.fields import ConfigText, ConfigDict, ConfigBool
 
-import uuid
-
 from vumi.transports import Transport
 from vumi.message import TransportUserMessage
 from vumi.config import ConfigClientEndpoint, ConfigServerEndpoint
@@ -485,7 +483,7 @@ class VoiceServerTransport(Transport):
 
     @inlineCallbacks
     def dial_outbound(self, to_addr):
-        call_uuid = str(uuid.uuid4())
+        call_uuid = self.generate_message_id()
         command = self.originate_formatter.format_call(
             self._to_addr, to_addr, call_uuid)
         self.log.info("Dialing outbound via Freeswitch ESL: %r" % command)
