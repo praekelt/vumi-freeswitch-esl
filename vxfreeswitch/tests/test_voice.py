@@ -7,6 +7,7 @@ import md5
 import os
 
 from twisted.internet.defer import inlineCallbacks
+from twisted.internet import defer, reactor
 
 from vumi.message import TransportUserMessage
 from vumi.tests.helpers import VumiTestCase
@@ -560,11 +561,15 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
 
-        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
-
         with LogCatcher(log_level=logging.WARN) as lc:
             yield self.tx_helper.dispatch_outbound(msg)
         self.assertEqual(lc.messages(), [])
+
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        # We need to wait for the client to be registered on the worker
+        d = defer.Deferred()
+        reactor.callLater(0.1, d.callback, None)
+        yield d
 
         events = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(events, [])
