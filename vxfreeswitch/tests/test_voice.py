@@ -6,7 +6,8 @@ import logging
 import md5
 import os
 
-from twisted.internet.defer import inlineCallbacks
+from twisted.internet.defer import inlineCallbacks, returnValue
+from twisted.internet import defer, reactor
 
 from vumi.message import TransportUserMessage
 from vumi.tests.helpers import VumiTestCase
@@ -529,6 +530,7 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
     transport_class = VoiceServerTransport
+    SLEEP_TIME = 0.01
 
     def setUp(self):
         self.tx_helper = self.add_helper(TransportHelper(self.transport_class))
@@ -548,6 +550,31 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         default.update(config)
         return self.tx_helper.get_transport(default)
 
+    def sleep(self, time=SLEEP_TIME):
+        d = defer.Deferred()
+        reactor.callLater(time, d.callback, None)
+        return d
+
+    @inlineCallbacks
+    def wait_for_client_registration(self, worker, clientid):
+        '''Waits until the client has registered itself to the worker. Returns
+        False if it times out waiting.'''
+        for _ in range(5):
+            if worker._originated_calls.get(clientid, None) is None:
+                returnValue(True)
+            yield self.sleep()
+        returnValue(False)
+
+    @inlineCallbacks
+    def wait_for_call_answer(self, worker, callid):
+        '''Waits until the call has been answered. Returns False if it times
+        out waiting.'''
+        for _ in range(5):
+            if worker._unanswered_channels.get(callid, None) is None:
+                returnValue(True)
+            yield self.sleep()
+        returnValue(False)
+
     @inlineCallbacks
     def test_create_call(self):
         self.worker = yield self.create_worker()
@@ -560,16 +587,21 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
 
-        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
-
         with LogCatcher(log_level=logging.WARN) as lc:
             yield self.tx_helper.dispatch_outbound(msg)
         self.assertEqual(lc.messages(), [])
+
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        # We need to wait for the client to be registered on the worker
+        r = yield self.wait_for_client_registration(self.worker, 'uuid-1234')
+        self.assertTrue(r)
 
         events = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(events, [])
 
         client.sendChannelAnswerEvent()
+        r = yield self.wait_for_call_answer(self.worker, 'uuid-1234')
+        self.assertTrue(r)
 
         cmd = yield client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
