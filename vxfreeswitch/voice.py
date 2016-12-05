@@ -335,6 +335,7 @@ class VoiceServerTransport(Transport):
         self._clients = {}
         self._originated_calls = {}
         self._unanswered_channels = {}
+        self._msisdn_mapping = {}
 
         self.config = self.get_static_config()
         self._to_addr = self.config.to_addr
@@ -396,6 +397,8 @@ class VoiceServerTransport(Transport):
         self.send_inbound_message(
             client, None, TransportUserMessage.SESSION_CLOSE, duration)
         client.registration_d.callback(None)
+        # Delete the msisdn mapping if it exists
+        self._msisdn_mapping.pop(client_addr, None)
         self.log.info("Deregistration complete.")
 
     def handle_input(self, client, text):
@@ -410,7 +413,8 @@ class VoiceServerTransport(Transport):
             voice['call_duration'] = duration
 
         self.publish_message(
-            from_addr=client.get_address(),
+            from_addr=self._msisdn_mapping.get(
+                client.get_address(), client.get_address()),
             to_addr=self._to_addr,
             session_event=session_event,
             content=text,
@@ -491,6 +495,7 @@ class VoiceServerTransport(Transport):
             call_uuid = reply.args[1]
         if self.config.wait_for_answer:
             self._unanswered_channels[call_uuid] = Deferred()
+        self._msisdn_mapping[call_uuid] = to_addr
         returnValue(call_uuid)
 
     @inlineCallbacks
