@@ -311,7 +311,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': "say:'voice test . '",
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -336,7 +337,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': "say:'voice test . '",
         }))
 
         self.client.sendDtmfEvent('5')
@@ -611,6 +613,45 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
+
+    @inlineCallbacks
+    def test_create_call_replies_msisdn(self):
+        """
+        If we originate a call with an outbound msisdn, all inbound replies
+        to that call should have the same msisdn as the from address, not
+        the uuid of the call session.
+        """
+        self.worker = yield self.create_worker()
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK uuid-1234"))
+
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+
+        # Freeswitch connect
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        yield self.wait_for_client_registration(self.worker, 'uuid-1234')
+        # Client answers call
+        client.sendChannelAnswerEvent()
+        yield self.wait_for_call_answer(self.worker, 'uuid-1234')
+
+        # Client types digit
+        client.sendDtmfEvent(4)
+        [inbound] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(inbound['from_addr'], '54321')
+
+        # Client hangs up
+        self.tx_helper.clear_dispatched_inbound()
+        client.sendChannelHangupCompleteEvent(7)
+        [inbound] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        self.assertEqual(inbound['from_addr'], '54321')
+
+        # Make sure that we don't keep the mapping after hangup
+        self.assertEqual(len(self.worker._msisdn_mapping), 0)
 
     @inlineCallbacks
     def test_connect_error(self):
