@@ -654,6 +654,43 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         self.assertEqual(len(self.worker._msisdn_mapping), 0)
 
     @inlineCallbacks
+    def test_create_call_outbound_using_msisdn(self):
+        """
+        If we originate a call using an msisdn, then when sending subsequent
+        messages to that call, we should be able to use the msisdn as the to
+        address, rather than the call uuid.
+        """
+        self.worker = yield self.create_worker()
+        factory = yield self.esl_helper.mk_server()
+        factory.add_fixture(
+            EslCommand("api originate /sofia/gateway/yogisip"
+                       " 100 XML default elcid +1234 60"),
+            FixtureApiResponse("+OK uuid-1234"))
+
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='new')
+        yield self.tx_helper.dispatch_outbound(msg)
+        # Freeswitch connect
+        client = yield self.esl_helper.mk_client(self.worker, 'uuid-1234')
+        yield self.wait_for_client_registration(self.worker, 'uuid-1234')
+        # Client answers call
+        client.sendChannelAnswerEvent()
+        yield self.wait_for_call_answer(self.worker, 'uuid-1234')
+
+        [ack] = yield self.tx_helper.wait_for_dispatched_events()
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+
+        self.tx_helper.clear_dispatched_events()
+        msg = self.tx_helper.make_outbound(
+            'foobar', '12345', '54321', session_event='close')
+        yield self.tx_helper.dispatch_outbound(msg)
+
+        [ack] = yield self.tx_helper.wait_for_dispatched_events()
+        self.assertEqual(ack['event_type'], 'ack')
+        self.assertEqual(ack['user_message_id'], msg['message_id'])
+
+    @inlineCallbacks
     def test_connect_error(self):
         self.worker = yield self.create_worker()
         factory = yield self.esl_helper.mk_server(
