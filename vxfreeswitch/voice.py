@@ -501,7 +501,9 @@ class VoiceServerTransport(Transport):
     @inlineCallbacks
     def handle_outbound_message(self, message):
         client_addr = message['to_addr']
-        client = self._clients.get(client_addr)
+        client = self._clients.get(
+            reverse_dict_lookup(self._msisdn_mapping, client_addr) or
+            client_addr)
 
         if (self.config.supports_outbound and
             client is None and
@@ -534,3 +536,10 @@ def get_in(d, *args, **kwargs):
         if d is None:
             return kwargs.get('default')
     return d
+
+
+def reverse_dict_lookup(d, v):
+    for k, val in d.iteritems():
+        if v == val:
+            return k
+    return None
