@@ -54,10 +54,6 @@ class FreeSwitchESLProtocol(EventProtocol):
         self.vumi_transport.log.debug(
             "[eventsocket] unknown Content-Type: %s" % content_type)
 
-    def unboundEvent(self, ctx, evname):
-        self.vumi_transport.log.debug(
-            "[eventsocket] unbound Event: %s" % evname)
-
     @inlineCallbacks
     def connectionMade(self):
         yield self.connect().addCallback(self.on_connect)
@@ -393,7 +389,8 @@ class VoiceServerTransport(Transport):
 
         if client_addr not in self._clients:
             return
-        self.log.info("Deregistering client connected from %r" % (client_addr,))
+        self.log.info(
+            "Deregistering client connected from %r" % (client_addr,))
         del self._clients[client_addr]
 
         self.send_inbound_message(
