@@ -311,7 +311,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': "say:'voice test . '",
         }))
 
         [ack] = yield self.tx_helper.get_dispatched_events()
@@ -336,7 +337,8 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
 
         cmd = yield self.client.queue.get()
         self.assertEqual(cmd, EslCommand.from_dict({
-            'type': 'sendmsg', 'name': 'playback', 'arg': "say:'voice test . '",
+            'type': 'sendmsg', 'name': 'playback',
+            'arg': "say:'voice test . '",
         }))
 
         self.client.sendDtmfEvent('5')
