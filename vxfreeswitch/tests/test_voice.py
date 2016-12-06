@@ -677,7 +677,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
         client.sendChannelAnswerEvent()
         yield self.wait_for_call_answer(self.worker, 'uuid-1234')
 
-        [ack] = yield self.tx_helper.wait_for_dispatched_events()
+        [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['user_message_id'], msg['message_id'])
 
@@ -686,7 +686,7 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
             'foobar', '12345', '54321', session_event='close')
         yield self.tx_helper.dispatch_outbound(msg)
 
-        [ack] = yield self.tx_helper.wait_for_dispatched_events()
+        [ack] = yield self.tx_helper.wait_for_dispatched_events(1)
         self.assertEqual(ack['event_type'], 'ack')
         self.assertEqual(ack['user_message_id'], msg['message_id'])
 
