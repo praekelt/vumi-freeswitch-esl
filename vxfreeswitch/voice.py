@@ -512,11 +512,9 @@ class VoiceServerTransport(Transport):
             try:
                 call_uuid = yield self.dial_outbound(client_addr)
             except FreeSwitchClientError as e:
-                self.log.warning("Error connecting to client %r: %s" % (
-                    client_addr, e))
-                yield self.publish_nack(
-                    message["message_id"],
-                    "Could not make call to client %r" % (client_addr,))
+                yield self.log_and_nack(
+                    message, "Could not make call to client %r: %s" % (
+                        client_addr, e))
             else:
                 self._originated_calls[call_uuid] = message
             return
