@@ -702,16 +702,16 @@ class TestVoiceServerTransportOutboundCalls(VumiTestCase):
 
         msg = self.tx_helper.make_outbound(
             'foobar', '12345', '54321', session_event='new')
-        with LogCatcher(message='Error connecting') as lc:
+        with LogCatcher(message='Could not make call') as lc:
             yield self.tx_helper.dispatch_outbound(msg)
         self.assertEqual(lc.messages(), [
-            "Error connecting to client u'54321':"
-            " +ERROR Bad horse.",
+            "Could not make call to client u'54321': +ERROR Bad horse.",
         ])
         [nack] = yield self.tx_helper.get_dispatched_events()
         self.assertEqual(nack['user_message_id'], msg['message_id'])
-        self.assertEqual(nack['nack_reason'],
-                         "Could not make call to client u'54321'")
+        self.assertEqual(
+            nack['nack_reason'],
+            "Could not make call to client u'54321': +ERROR Bad horse.")
 
     @inlineCallbacks
     def test_client_disconnect_without_answer(self):
