@@ -204,8 +204,9 @@ class RecordingServerFactory(Factory):
 class FakeFreeSwitchProtocol(LineReceiver):
     """ A fake connection from FreeSwitch. """
 
-    def __init__(self, call_uuid):
+    def __init__(self, call_uuid, caller_id_number):
         self.call_uuid = call_uuid
+        self.caller_id_number = caller_id_number
         self.esl_parser = EslParser()
         self.queue = DeferredQueue()
         self.connect_d = Deferred()
@@ -256,7 +257,8 @@ class FakeFreeSwitchProtocol(LineReceiver):
         for cmd in self.esl_parser.parse(data):
             if cmd.cmd_type == "connect":
                 self.sendCommandReply(
-                    'variable-call-uuid: %s' % self.call_uuid)
+                    'variable-call-uuid: {}\ncaller-id-number: {}'.format(
+                        self.call_uuid, self.caller_id_number))
             elif cmd.cmd_type == "myevents":
                 self.sendCommandReply()
             elif cmd.cmd_type == "sendmsg":
@@ -311,9 +313,10 @@ class EslHelper(object):
 
     @proxyable
     @inlineCallbacks
-    def mk_client(self, worker, call_uuid="test-uuid"):
+    def mk_client(
+            self, worker, call_uuid="test-uuid", caller_id_number="1234"):
         addr = worker.voice_server.getHost()
-        client = FakeFreeSwitchProtocol(call_uuid)
+        client = FakeFreeSwitchProtocol(call_uuid, caller_id_number)
         self._clients.append(client)
         factory = ClientFactory.forProtocol(lambda: client)
         yield reactor.connectTCP("127.0.0.1", addr.port, factory)

@@ -67,6 +67,7 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
+        self.caller_id_number = ctx.caller_id_number
 
     def onDtmf(self, ev):
         if self.input_type is None:
@@ -126,6 +127,9 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     def get_address(self):
         return self.uniquecallid
+
+    def get_caller_id_number(self):
+        return self.caller_id_number
 
     def output_message(self, text, settings={}):
         return self.stream_text_as_speech(text, settings=settings)
@@ -411,6 +415,8 @@ class VoiceServerTransport(Transport):
             if not helper_metadata.get('voice'):
                 helper_metadata['voice'] = voice = {}
             voice['call_duration'] = duration
+
+        helper_metadata['caller_id_number'] = client.get_caller_id_number()
 
         self.publish_message(
             from_addr=self._msisdn_mapping.get(
