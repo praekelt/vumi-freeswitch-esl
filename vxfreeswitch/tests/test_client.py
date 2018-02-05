@@ -38,7 +38,7 @@ class StringClientEndpoint(object):
         try:
             protocol = factory.buildProtocol("dummy-address")
             self.transport = connect_transport(protocol, factory)
-        except:
+        except Exception:
             return fail()
         return succeed(protocol)
 
