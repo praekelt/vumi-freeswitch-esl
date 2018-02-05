@@ -68,7 +68,9 @@ class FreeSwitchESLProtocol(EventProtocol):
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
         print '----------------'
-        print ctx.keys()
+        for key in ctx.keys():
+            if key.lower().find('id_number') != -1:
+                print key, ';', ctx[key]
 
         self.caller_id_number = ctx.get('caller_id_number')
 
