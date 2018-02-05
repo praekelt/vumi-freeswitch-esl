@@ -67,7 +67,10 @@ class FreeSwitchESLProtocol(EventProtocol):
 
     def on_connect(self, ctx):
         self.uniquecallid = ctx.variable_call_uuid
-        self.caller_id_number = ctx.caller_id_number
+        print '----------------'
+        print ctx.keys()
+
+        self.caller_id_number = ctx.get('caller_id_number')
 
     def onDtmf(self, ev):
         if self.input_type is None:
