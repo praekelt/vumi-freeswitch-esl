@@ -320,6 +320,13 @@ class TestVoiceServerTransportInboundCalls(VumiTestCase):
         self.assertEqual(ack['sent_message_id'], msg['message_id'])
 
     @inlineCallbacks
+    def test_inbound_caller_id_number(self):
+        [reg] = yield self.tx_helper.wait_for_dispatched_inbound(1)
+        msg = yield self.tx_helper.make_dispatch_reply(reg, "voice test")
+
+        self.assertEqual(msg['helper_metadata']['caller_id_number'], "1234")
+
+    @inlineCallbacks
     def test_simpledigitcapture(self):
         yield self.tx_helper.wait_for_dispatched_inbound(1)
         self.tx_helper.clear_dispatched_inbound()
