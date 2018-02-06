@@ -257,7 +257,8 @@ class FakeFreeSwitchProtocol(LineReceiver):
         for cmd in self.esl_parser.parse(data):
             if cmd.cmd_type == "connect":
                 self.sendCommandReply(
-                    'variable-call-uuid: {}\ncaller-id-number: {}'.format(
+                    'variable-call-uuid: {}\n'
+                    'variable-caller-id-number: {}'.format(
                         self.call_uuid, self.caller_id_number))
             elif cmd.cmd_type == "myevents":
                 self.sendCommandReply()
